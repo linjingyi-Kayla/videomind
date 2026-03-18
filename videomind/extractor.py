@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from yt_dlp import YoutubeDL
@@ -98,9 +99,19 @@ def extract_video_text(url: str) -> Dict[str, Any]:
     仅提取：title / description / tags / subtitles(优先自动字幕)。
     为提高 B 站成功率，显式设置 UA、打开自动字幕提取等开关。
     """
+    cookiefile = os.getenv("YTDLP_COOKIEFILE", "youtube_cookies.txt")
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
+    # yt-dlp 配置：尽量贴近你给的示例，同时保留字幕提取相关参数
     ydl_opts = {
+        "format": "best",
         "quiet": True,
         "no_warnings": True,
+        "nocheckcertificate": True,
         "noplaylist": True,
         "skip_download": True,
         "extract_flat": False,
@@ -108,14 +119,13 @@ def extract_video_text(url: str) -> Dict[str, Any]:
         "writeautomaticsub": True,
         "subtitlesformat": "vtt/srt/best",
         "subtitleslangs": ["zh-Hans", "zh-CN", "zh", "zh-Hant", "zh-TW", "en", "en-US"],
+        # 告诉程序去哪里找你的登录信息（可选；文件不存在则不强制启用）
+        **({"cookiefile": cookiefile} if cookiefile and os.path.exists(cookiefile) else {}),
+        "user_agent": user_agent,
         "http_headers": {
-            # B 站对 UA/Referer 更敏感一些
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0 Safari/537.36"
-            ),
+            # B 站对 UA/Referer 更敏感一些（字幕下载处也会单独带 Referer）
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "User-Agent": user_agent,
         },
     }
 
