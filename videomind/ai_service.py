@@ -68,6 +68,11 @@ def _build_prompt(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 
 字幕或文本（可能为空）：
 {text if text else "(无字幕/无文本)"}
+
+补充说明：
+- 下面这段字幕是“原始字幕文本”，请先梳理其内部逻辑（按出现顺序/因果/结论），再产出总结；
+- 若字幕带时间戳，请把时间戳当作段落线索，不要原样堆叠到输出里；
+- key_points（3条）建议按逻辑推进顺序输出。
 """.strip()
 
     return [

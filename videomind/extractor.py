@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
+from youtube_transcript_api import YouTubeTranscriptApi
 
 
 def _pick_lang_track(subs_dict: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -94,11 +96,95 @@ def _download_subtitle_text(url: str, fmt_url: str) -> str:
     return text.strip()
 
 
+def _extract_youtube_video_id(url: str) -> str:
+    u = urlparse(url)
+    host = (u.netloc or "").lower()
+    path = (u.path or "").strip("/")
+
+    # youtu.be/<id>
+    if "youtu.be" in host:
+        if not path:
+            raise ValueError("无法从 youtu.be URL 解析出 video id")
+        return path.split("/")[0]
+
+    # youtube.com/watch?v=<id>
+    if "youtube.com" in host or "youtube-nocookie.com" in host or "googlevideo.com" in host:
+        qs = parse_qs(u.query or "")
+        if qs.get("v"):
+            return qs["v"][0]
+
+        # youtube.com/shorts/<id> or youtube.com/live/<id>
+        parts = path.split("/")
+        if len(parts) >= 2 and parts[0] in {"shorts", "live"}:
+            return parts[1]
+
+    raise ValueError("无法从 URL 解析出 YouTube video id")
+
+
+def _format_ts(seconds: float) -> str:
+    # 输出 mm:ss，便于总结时快速“抓住段落位置”
+    s = int(seconds)
+    m = s // 60
+    sec = s % 60
+    return f"{m:02d}:{sec:02d}"
+
+
+def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
+    video_id = _extract_youtube_video_id(url)
+
+    # 优先中文，再到英文
+    languages = ["zh-Hans", "zh-CN", "zh", "zh-Hant", "zh-TW", "en", "en-US"]
+    last_err: Optional[Exception] = None
+    transcript = None
+    used_lang = languages[0]
+
+    api = YouTubeTranscriptApi()
+    for lang in languages:
+        try:
+            # 返回可迭代的 FetchedTranscript（snippet: text/start/duration）
+            transcript = api.fetch(video_id, languages=[lang], preserve_formatting=False)
+            used_lang = lang
+            break
+        except Exception as e:
+            last_err = e
+
+    if transcript is None or len(transcript) == 0:
+        raise RuntimeError(f"YouTube 无可用字幕：{last_err}")
+
+    lines: List[str] = []
+    for seg in transcript:
+        start = float(getattr(seg, "start", 0.0) or 0.0)
+        text = str(getattr(seg, "text", "") or "").strip()
+        if not text:
+            continue
+        lines.append(f"[{_format_ts(start)}] {text}")
+
+    # 不获取 title/description/tags：youtube-transcript-api 专注字幕抽取
+    return {
+        "title": None,
+        "description": None,
+        "tags": [],
+        "subtitles_text": "\n".join(lines).strip(),
+        "subtitles_meta": {
+            "lang": used_lang,
+            "source": "youtube_transcript_api",
+            "has_timestamps": True,
+        },
+        "extractor_key": "YoutubeTranscriptAPI",
+        "webpage_url": url,
+    }
+
+
 def extract_video_text(url: str) -> Dict[str, Any]:
     """
     仅提取：title / description / tags / subtitles(优先自动字幕)。
     为提高 B 站成功率，显式设置 UA、打开自动字幕提取等开关。
     """
+    # YouTube：优先用 youtube-transcript-api 直接拉“字幕文本”，避免 yt-dlp 的 format 选择/反爬封锁
+    host = (urlparse(url).netloc or "").lower()
+    if "youtube.com" in host or "youtu.be" in host or "youtube-nocookie.com" in host:
+        return _extract_youtube_transcript_text(url)
+
     cookiefile = os.getenv("YTDLP_COOKIEFILE", "youtube_cookies.txt")
     user_agent = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -107,7 +193,9 @@ def extract_video_text(url: str) -> Dict[str, Any]:
     )
 
     # yt-dlp 配置：尽量贴近你给的示例，同时保留字幕提取相关参数
-    ydl_opts = {
+    # 注意：如果你提供了 cookiefile，但它无效/过期，可能会导致抽取失败。
+    # 因此这里做一次失败重试：去掉 cookiefile 再试一次。
+    base_opts = {
         "format": "best",
         "quiet": True,
         "no_warnings": True,
@@ -119,18 +207,71 @@ def extract_video_text(url: str) -> Dict[str, Any]:
         "writeautomaticsub": True,
         "subtitlesformat": "vtt/srt/best",
         "subtitleslangs": ["zh-Hans", "zh-CN", "zh", "zh-Hant", "zh-TW", "en", "en-US"],
-        # 告诉程序去哪里找你的登录信息（可选；文件不存在则不强制启用）
-        **({"cookiefile": cookiefile} if cookiefile and os.path.exists(cookiefile) else {}),
         "user_agent": user_agent,
         "http_headers": {
-            # B 站对 UA/Referer 更敏感一些（字幕下载处也会单独带 Referer）
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "User-Agent": user_agent,
         },
     }
 
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    if cookiefile and os.path.exists(cookiefile):
+        base_opts["cookiefile"] = cookiefile
+
+    def _extract(opts: Dict[str, Any]) -> Dict[str, Any]:
+        with YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    def _is_format_unavailable(err: Exception) -> bool:
+        msg = str(err)
+        return "Requested format is not available" in msg
+
+    info: Dict[str, Any]
+    try:
+        info = _extract(base_opts)
+    except Exception as e:
+        last_err: Exception = e
+
+        # 1) 如果启用了 cookiefile 且失败，再退回到不使用 cookiefile。
+        opts_wo_cookie: Optional[Dict[str, Any]] = None
+        if "cookiefile" in base_opts:
+            opts_wo_cookie = dict(base_opts)
+            opts_wo_cookie.pop("cookiefile", None)
+            try:
+                info = _extract(opts_wo_cookie)
+                opts_wo_cookie = None
+            except Exception as e2:
+                last_err = e2
+
+        # 2) 如果仍然是 format 不可用，再换更宽松的 format 选择器重试。
+        if _is_format_unavailable(last_err):
+            alt_formats = [
+                "bestvideo*+bestaudio/best",
+                "bestaudio/best",
+            ]
+            candidates = [opts_wo_cookie] if opts_wo_cookie else []
+            # 如果前面没成功且没进入 opts_wo_cookie，仍然可以在 base_opts 上换格式
+            if not candidates:
+                candidates = [dict(base_opts)]
+            for opts in candidates:
+                for fmt in alt_formats:
+                    retry_opts = dict(opts)
+                    retry_opts["format"] = fmt
+                    try:
+                        info = _extract(retry_opts)
+                        # 成功就直接返回
+                        break
+                    except Exception as e3:
+                        last_err = e3
+                else:
+                    continue
+                break
+        else:
+            # 非 format 问题，直接抛出最后一次错误
+            raise last_err
+
+        # 最后兜底：如果 info 仍未被赋值则抛出 last_err
+        if "info" not in locals():
+            raise last_err
 
     title = (info.get("title") or "").strip() or None
     description = (info.get("description") or "").strip() or None
