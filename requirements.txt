@@ -9,3 +9,4 @@ pydantic>=2.8.0
 openai>=1.40.0
 SQLAlchemy>=2.0.0
 pywebpush>=0.0.0
+psycopg2-binary
