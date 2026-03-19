@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from youtube_transcript_api import YouTubeTranscriptApi
+import requests
 
 def _extract_youtube_video_id(url: str) -> str:
     u = urlparse(url)
@@ -39,58 +41,218 @@ def _format_ts(seconds: float) -> str:
     return f"{m:02d}:{sec:02d}"
 
 
+def _to_seconds(v: Any) -> Optional[float]:
+    """
+    尽量把字幕 segment 里的时间字段规范为“秒（float）”。
+    兼容：秒 / 毫秒 / "00:12" / "00:00:12"。
+    """
+    if v is None:
+        return None
+
+    # 数值：通常是秒或毫秒
+    if isinstance(v, (int, float)):
+        fv = float(v)
+        if fv > 1000:
+            # 很可能是毫秒
+            return fv / 1000.0
+        return fv
+
+    # 字符串：尝试解析 "mm:ss" 或 "hh:mm:ss"
+    s = str(v).strip()
+    if not s:
+        return None
+
+    # "12.3" 这种
+    try:
+        fv = float(s)
+        return fv / 1000.0 if fv > 1000 else fv
+    except Exception:
+        pass
+
+    # "00:12" 或 "00:00:12"
+    m = re.match(r"^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?$", s)
+    if m:
+        a = int(m.group(1))
+        b = int(m.group(2))
+        c = m.group(3)
+        if c is None:
+            # mm:ss
+            return a * 60 + b
+        # hh:mm:ss
+        hh = a
+        return hh * 3600 + b * 60 + int(c)
+
+    return None
+
+
 def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
+    """
+    通过 RapidAPI 的 youtube-transcript 获取字幕（带时间戳），
+    完全绕开本地下载，避免 Railway IP 被封。
+    """
     video_id = _extract_youtube_video_id(url)
 
-    # 优先中文，再到英文
-    languages = ["zh-Hans", "zh-CN", "zh", "zh-Hant", "zh-TW", "en", "en-US"]
-    last_err: Optional[Exception] = None
-    transcript = None
-    used_lang = languages[0]
+    rapid_api_key = os.getenv("RAPIDAPI_KEY")
+    if not rapid_api_key:
+        raise RuntimeError("缺少 RAPIDAPI_KEY（请在环境变量中配置）")
 
-    api = YouTubeTranscriptApi()
-    for lang in languages:
-        try:
-            # 返回可迭代的 FetchedTranscript（snippet: text/start/duration）
-            transcript = api.fetch(video_id, languages=[lang], preserve_formatting=False)
-            used_lang = lang
-            break
-        except Exception as e:
-            last_err = e
-
-    if transcript is None or len(transcript) == 0:
-        raise RuntimeError(f"YouTube 无可用字幕：{last_err}")
-
-    lines: List[str] = []
-    for seg in transcript:
-        start = float(getattr(seg, "start", 0.0) or 0.0)
-        text = str(getattr(seg, "text", "") or "").strip()
-        if not text:
-            continue
-        lines.append(f"[{_format_ts(start)}] {text}")
-
-    # 不获取 title/description/tags：youtube-transcript-api 专注字幕抽取
-    return {
-        "title": None,
-        "description": None,
-        "tags": [],
-        "subtitles_text": "\n".join(lines).strip(),
-        "subtitles_meta": {
-            "lang": used_lang,
-            "source": "youtube_transcript_api",
-            "has_timestamps": True,
-        },
-        "extractor_key": "YoutubeTranscriptAPI",
-        "webpage_url": url,
+    endpoint = os.getenv(
+        "RAPIDAPI_ENDPOINT",
+        "https://youtube-transcript3.p.rapidapi.com/api/transcript",
+    )
+    host = os.getenv("RAPIDAPI_HOST", "youtube-transcript3.p.rapidapi.com")
+    headers = {
+        "X-RapidAPI-Key": rapid_api_key,
+        "X-RapidAPI-Host": host,
     }
+
+    # 先用 video_id 拉取；部分服务端字段名可能略有不同，这里做轻量兜底
+    params_list = [
+        {"video_id": video_id},
+        {"videoId": video_id},
+        {"id": video_id},
+        {"url": url},
+    ]
+    last_resp_text: str = ""
+    had_success_200 = False
+    had_empty_transcript = False
+
+    for params in params_list:
+        try:
+            resp = requests.get(endpoint, headers=headers, params=params, timeout=60)
+            last_resp_text = resp.text[:2000]
+        except requests.Timeout as e:
+            raise RuntimeError("字幕服务超时，请稍后重试。") from e
+        except Exception as e:
+            raise RuntimeError(f"字幕服务请求失败：{e}") from e
+
+        if resp.status_code == 429:
+            raise RuntimeError("字幕服务超额限制（429），请稍后再试。")
+        if resp.status_code >= 500:
+            raise RuntimeError(f"字幕服务服务器错误（HTTP {resp.status_code}），请稍后再试。")
+        if resp.status_code < 200 or resp.status_code >= 300:
+            # 其他 4xx：继续尝试下一个 params（例如换 url）
+            continue
+        had_success_200 = True
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            raise RuntimeError(f"字幕服务返回非 JSON：{last_resp_text}") from e
+
+        # 根据你的描述：返回 JSON 中的 transcript 字段是一个数组
+        transcript: Any = None
+        if isinstance(data, dict):
+            transcript = data.get("transcript")
+            if transcript is None and isinstance(data.get("data"), dict):
+                transcript = data["data"].get("transcript")
+        else:
+            transcript = data
+
+        # transcript 为空：别立刻返回，继续尝试下一个参数名
+        if not transcript:
+            had_empty_transcript = True
+            continue
+
+        # transcript 通常是 list[dict]，每个 dict 里至少包含 text 和 offset
+        lines: List[str] = []
+        if isinstance(transcript, list):
+            for item in transcript:
+                if isinstance(item, str):
+                    t = item.strip()
+                    if t:
+                        lines.append(t)
+                    continue
+                if not isinstance(item, dict):
+                    continue
+
+                text = (
+                    item.get("text")
+                    or item.get("sentence")
+                    or item.get("caption")
+                    or item.get("value")
+                    or item.get("transcript")
+                    or ""
+                )
+                text = str(text).strip()
+                if not text:
+                    continue
+
+                # 你的要求：offset -> [mm:ss]
+                offset = item.get("offset")
+                if offset is None:
+                    offset = (
+                        item.get("start")
+                        or item.get("timestamp")
+                        or item.get("time")
+                        or item.get("startMs")
+                        or item.get("start_ms")
+                    )
+
+                sec = _to_seconds(offset)
+                if sec is None:
+                    lines.append(text)
+                else:
+                    lines.append(f"[{_format_ts(sec)}] {text}")
+        else:
+            # 非 list 兜底：如果 data 里有纯文本字段
+            maybe_text = None
+            if isinstance(data, dict):
+                for k in ("text", "transcript", "caption"):
+                    if k in data:
+                        maybe_text = data[k]
+                        break
+            if maybe_text:
+                mt = str(maybe_text).strip()
+                return {
+                    "title": None,
+                    "description": None,
+                    "tags": [],
+                    "subtitles_text": mt,
+                    "subtitles_meta": {"source": "rapidapi", "has_timestamps": False},
+                    "extractor_key": "RapidAPI:youtube-transcript3",
+                    "webpage_url": url,
+                }
+
+        if not lines:
+            had_empty_transcript = True
+            continue
+
+        return {
+            "title": None,
+            "description": None,
+            "tags": [],
+            "subtitles_text": "\n".join(lines).strip(),
+            "subtitles_meta": {
+                "source": "rapidapi",
+                "has_timestamps": any(line.startswith("[") for line in lines),
+            },
+            "extractor_key": "RapidAPI:youtube-transcript3",
+            "webpage_url": url,
+        }
+
+    # 全部尝试都拿不到字幕：返回“暂无可用字幕”
+    if had_success_200 and had_empty_transcript:
+        return {
+            "title": None,
+            "description": None,
+            "tags": [],
+            "subtitles_text": "该视频暂无可用字幕",
+            "subtitles_meta": {"source": "rapidapi", "has_timestamps": False},
+            "extractor_key": "RapidAPI:youtube-transcript3",
+            "webpage_url": url,
+        }
+
+    # 完全失败：返回错误
+    raise RuntimeError(f"字幕服务请求失败（RapidAPI）。响应：{last_resp_text}")
 
 
 def extract_video_text(url: str) -> Dict[str, Any]:
     """
     仅提取：title / description / tags / subtitles(优先自动字幕)。
-    为提高 B 站成功率，显式设置 UA、打开自动字幕提取等开关。
+    生产模式：优先走 RapidAPI 字幕服务（无本地下载、无 yt-dlp / ffmpeg）。
     """
-    # YouTube：优先用 youtube-transcript-api 直接拉“字幕文本”，避免 yt-dlp 的 format 选择/反爬封锁
+    # YouTube：优先走 RapidAPI 获取“带时间戳”的字幕文本
     host = (urlparse(url).netloc or "").lower()
     if "youtube.com" in host or "youtu.be" in host or "youtube-nocookie.com" in host:
         return _extract_youtube_transcript_text(url)
