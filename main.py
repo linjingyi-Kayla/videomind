@@ -340,11 +340,21 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
     """
     session = new_session()
     try:
-        if not subscription_id:
-            subscription_id = _get_latest_subscription_id(session)
+        target_sid = subscription_id
+        if not target_sid:
+            target_sid = _get_latest_subscription_id(session)
 
-        q = select(Task).where(Task.subscription_id == subscription_id).order_by(desc(Task.created_at)).limit(50)
-        items = session.execute(q).scalars().all()
+        # 先按 subscription_id 查；如果为空，做兜底避免“订阅变更/本地缓存旧导致看不到任务”
+        q1 = select(Task).where(Task.subscription_id == target_sid).order_by(desc(Task.created_at)).limit(50)
+        items = session.execute(q1).scalars().all()
+
+        if target_sid and not items:
+            q2 = select(Task).where(Task.subscription_id.is_(None)).order_by(desc(Task.created_at)).limit(50)
+            items = session.execute(q2).scalars().all()
+
+        if not items:
+            q3 = select(Task).order_by(desc(Task.created_at)).limit(50)
+            items = session.execute(q3).scalars().all()
 
         out: List[HistoryItem] = []
         for t in items:
@@ -368,7 +378,7 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
                     created_at=t.created_at,
                 )
             )
-        return HistoryResponse(subscription_id=subscription_id, items=out)
+        return HistoryResponse(subscription_id=target_sid, items=out)
     finally:
         session.close()
 

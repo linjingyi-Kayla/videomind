@@ -174,7 +174,7 @@
       }
 
       @media (max-width: 640px){
-        .columns{ grid-template-columns: 1fr; }
+        .columns{ grid-template-columns:repeat(2, 1fr); }
       }
     </style>
   </head>
@@ -311,14 +311,14 @@
         if (!subscriptionId) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';
-          return;
+          return [];
         }
 
         const resp = await fetch('/api/history?subscription_id=' + encodeURIComponent(subscriptionId));
         if (!resp.ok) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';
-          return;
+          return [];
         }
         const data = await resp.json();
         const items = data.items || [];
@@ -428,6 +428,8 @@
 
           historyEl.appendChild(card);
         }
+
+        return items;
       }
 
       notifyBtn.addEventListener('click', async () => {
@@ -446,7 +448,23 @@
         navigator.serviceWorker.register('/service-worker.js').catch(console.error);
       }
 
-      refreshHistory().catch(console.error);
+      // 自动轮询，避免用户等待/刷新丢失进度
+      refreshHistory()
+        .then(() => {
+          window.__vm_poll = setInterval(async () => {
+            try {
+              const items = await refreshHistory();
+              const hasPending = (items || []).some((x) => x.status === 'pending');
+              if (!hasPending && window.__vm_poll) {
+                clearInterval(window.__vm_poll);
+                window.__vm_poll = null;
+              }
+            } catch (e) {
+              // 静默：不影响页面使用
+            }
+          }, 6000);
+        })
+        .catch(console.error);
     </script>
   </body>
 </html>
