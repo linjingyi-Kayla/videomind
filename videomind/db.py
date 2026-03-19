@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine
-from sqlalchemy import text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .db_models import Base
@@ -19,17 +17,23 @@ def _db_path() -> str:
 
 
 def _db_url() -> str:
-    # 使用 pysqlite driver，兼容异步 worker 线程
+    # Railway/生产：优先使用 DATABASE_URL（Postgres/MySQL 等）
+    db_url = os.getenv("DATABASE_URL") or os.getenv("VIDEOMIND_DATABASE_URL")
+    if db_url:
+        return db_url
+
+    # 本地开发：SQLite（兼容异步 worker 线程）
     db_file = _db_path().replace("\\", "/")
     return f"sqlite+pysqlite:///{db_file}"
 
 
 def create_engine_and_session() -> tuple:
-    engine = create_engine(
-        _db_url(),
-        connect_args={"check_same_thread": False},
-        future=True,
-    )
+    url = _db_url()
+    connect_args = {}
+    if url.startswith("sqlite"):
+        connect_args = {"check_same_thread": False}
+
+    engine = create_engine(url, connect_args=connect_args, future=True)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return engine, SessionLocal
 
@@ -38,13 +42,41 @@ engine, SessionLocal = create_engine_and_session()
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
-    # 兼容已有 SQLite 表：如果 tasks 表缺少 category 列则补齐
-    with engine.begin() as conn:
-        rows = conn.execute(text("PRAGMA table_info(tasks)")).fetchall()
-        col_names = {r[1] for r in rows}  # r[1] = name
-        if "category" not in col_names:
-            conn.execute(text("ALTER TABLE tasks ADD COLUMN category VARCHAR"))
+    # SQLite 升级兼容：旧版 tasks 表没有 task_uuid（且 id 为 TEXT 主键）
+    # 迁移策略：tasks -> tasks_old -> 重建 tasks（把旧 id 复制到 task_uuid）
+    try:
+        insp = inspect(engine)
+        if "tasks" in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns("tasks")]
+            if "task_uuid" not in cols and engine.dialect.name == "sqlite":
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
+                Base.metadata.create_all(bind=engine)
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO tasks (
+                              task_uuid, video_url, title, category, summary, key_points_json,
+                              remind_at, is_notified, status, error_message, subscription_id,
+                              created_at, updated_at
+                            )
+                            SELECT
+                              id as task_uuid, video_url, title, category, summary, key_points_json,
+                              remind_at, is_notified, status, error_message, subscription_id,
+                              created_at, updated_at
+                            FROM tasks_old
+                            """
+                        )
+                    )
+                    conn.execute(text("DROP TABLE tasks_old"))
+            else:
+                Base.metadata.create_all(bind=engine)
+        else:
+            Base.metadata.create_all(bind=engine)
+    except Exception:
+        # 无需阻断启动；数据库权限不足时让应用按只读模型启动
+        Base.metadata.create_all(bind=engine)
 
 
 def new_session() -> Session:

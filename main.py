@@ -104,29 +104,68 @@ def _calc_next_remind_datetime(hhmm: str) -> datetime:
     return dt
 
 
+def _extract_youtube_title_with_ytdlp(url: str) -> Optional[str]:
+    """
+    仅提取元信息 title，不下载媒体文件，避免生成临时文件。
+    若在 Railway 被封锁/失败则返回 None。
+    """
+    try:
+        import yt_dlp  # 按需导入，避免不需要时增加启动开销
+
+        ydl_opts = {
+            "skip_download": True,
+            "quiet": True,
+            "nocheckcertificate": True,
+            "noplaylist": True,
+            "ignoreerrors": True,
+            "no_warnings": True,
+            # 限制抓 title 的网络等待，避免拖慢后台任务
+            "socket_timeout": 20,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if isinstance(info, dict):
+            t = info.get("title")
+            if t:
+                return str(t).strip() or None
+    except Exception:
+        return None
+    return None
+
+
 def _get_latest_subscription_id(session) -> Optional[str]:
     sub = session.execute(select(Subscription).order_by(desc(Subscription.created_at)).limit(1)).scalars().first()
     return sub.id if sub else None
 
 
-async def _process_task(task_id: str) -> None:
+async def _process_task(task_uuid: str) -> None:
     """
     后台处理：抽取字幕 -> DeepSeek 总结 -> 写入 tasks 表
     """
     session = new_session()
     try:
-        task = session.get(Task, task_id)
+        task = session.execute(select(Task).where(Task.task_uuid == task_uuid)).scalars().first()
         if not task:
             return
 
         extracted: Dict[str, Any] = await asyncio.to_thread(extract_video_text, task.video_url)
+
+        # 如果标题缺失，yt-dlp 仅抓 title（无下载）。与 DeepSeek 并行以减少总耗时。
+        extracted_title = extracted.get("title")
+        title_future = None
+        if not extracted_title:
+            title_future = asyncio.to_thread(_extract_youtube_title_with_ytdlp, task.video_url)
+
         ai = await asyncio.to_thread(analyze_video, extracted)
 
         key_points_json = json.dumps(ai.key_points, ensure_ascii=False)
         summary = ai.summary
 
         remind_at_dt = _calc_next_remind_datetime(ai.remind_at)
-        task.title = extracted.get("title")
+        # title 优先来自抽取结果；若缺失则用 yt-dlp 再兜底一次
+        if title_future:
+            extracted_title = await title_future
+        task.title = str(extracted_title).strip() if extracted_title else "未命名视频"
         task.category = ai.category
         task.summary = summary
         task.key_points_json = key_points_json
@@ -136,7 +175,7 @@ async def _process_task(task_id: str) -> None:
         task.error_message = None
         session.commit()
     except Exception as e:
-        task = session.get(Task, task_id)
+        task = session.execute(select(Task).where(Task.task_uuid == task_uuid)).scalars().first()
         if task:
             task.status = "error"
             task.error_message = str(e)
@@ -185,7 +224,7 @@ async def _send_due_tasks_loop() -> None:
                 payload = {
                     "title": "VideoMind 提醒",
                     "body": (t.summary or "")[:120] or "你的总结已就绪",
-                    "task_id": t.id,
+                    "task_id": t.task_uuid,
                     "url": t.video_url,
                 }
                 try:
@@ -311,9 +350,9 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
         if not sub_id:
             sub_id = _get_latest_subscription_id(session)
 
-        task_id = uuid.uuid4().hex
+        task_uuid = uuid.uuid4().hex
         t = Task(
-            id=task_id,
+            task_uuid=task_uuid,
             video_url=str(req.url),
             title=None,
             summary=None,
@@ -331,8 +370,8 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
     finally:
         session.close()
 
-    background.add_task(_process_task, task_id)
-    return SummarizeResponse(task_id=task_id, status="pending")
+    background.add_task(_process_task, task_uuid)
+    return SummarizeResponse(task_id=task_uuid, status="pending")
 
 
 @app.get("/api/history", response_model=HistoryResponse)
@@ -369,7 +408,7 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
 
             out.append(
                 HistoryItem(
-                    id=t.id,
+                    id=t.task_uuid,
                     video_url=t.video_url,
                     title=t.title,
                 category=t.category,
@@ -397,7 +436,7 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
     """
     session = new_session()
     try:
-        task = session.get(Task, task_id)
+        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
         if not task:
             raise HTTPException(status_code=404, detail="task_id 不存在")
         if task.subscription_id is None:
@@ -418,7 +457,7 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
                 key_points = None
 
         return HistoryItem(
-            id=task.id,
+            id=task.task_uuid,
             video_url=task.video_url,
             title=task.title,
             category=task.category,

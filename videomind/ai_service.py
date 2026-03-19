@@ -86,7 +86,7 @@ def analyze_video(payload: Dict[str, Any]) -> AIResult:
     resp = cli.chat.completions.create(
         model=_model_name(),
         temperature=0.2,
-        max_tokens=600,
+        max_tokens=450,
         messages=_build_prompt(payload),
     )
     text = (resp.choices[0].message.content or "").strip()

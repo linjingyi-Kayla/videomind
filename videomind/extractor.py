@@ -116,6 +116,9 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
     last_resp_text: str = ""
     had_success_200 = False
     had_empty_transcript = False
+    last_title: Optional[str] = None
+    last_description: Optional[str] = None
+    last_tags: List[str] = []
 
     for params in params_list:
         try:
@@ -141,6 +144,37 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
             raise RuntimeError(f"字幕服务返回非 JSON：{last_resp_text}") from e
 
         # 根据你的描述：返回 JSON 中的 transcript 字段是一个数组
+        # 同时尽量解析 title/description/tags（不同 RapidAPI 服务字段名可能略有不同）
+        title = None
+        description = None
+        tags: List[str] = []
+        if isinstance(data, dict):
+            title = data.get("title") or data.get("video_title") or data.get("videoTitle")
+            description = (
+                data.get("description") or data.get("video_description") or data.get("videoDescription")
+            )
+
+            raw_tags = data.get("tags") or data.get("keywords") or data.get("tag")
+            if isinstance(raw_tags, list):
+                tags = [str(x).strip() for x in raw_tags if str(x).strip()][:20]
+            elif isinstance(raw_tags, str):
+                tags = [t.strip() for t in re.split(r"[,\n]", raw_tags) if t.strip()][:20]
+
+            # 嵌套字段兜底
+            if not title:
+                meta = data.get("meta") or data.get("metadata") or {}
+                if isinstance(meta, dict):
+                    title = meta.get("title") or meta.get("video_title")
+
+        if title is not None:
+            title = str(title).strip() or None
+        if description is not None:
+            description = str(description).strip() or None
+
+        last_title = title
+        last_description = description
+        last_tags = tags
+
         transcript: Any = None
         if isinstance(data, dict):
             transcript = data.get("transcript")
@@ -205,9 +239,9 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
             if maybe_text:
                 mt = str(maybe_text).strip()
                 return {
-                    "title": None,
-                    "description": None,
-                    "tags": [],
+                    "title": title,
+                    "description": description,
+                    "tags": tags,
                     "subtitles_text": mt,
                     "subtitles_meta": {"source": "rapidapi", "has_timestamps": False},
                     "extractor_key": "RapidAPI:youtube-transcript3",
@@ -219,9 +253,9 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
             continue
 
         return {
-            "title": None,
-            "description": None,
-            "tags": [],
+            "title": title,
+            "description": description,
+            "tags": tags,
             "subtitles_text": "\n".join(lines).strip(),
             "subtitles_meta": {
                 "source": "rapidapi",
@@ -234,9 +268,9 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
     # 全部尝试都拿不到字幕：返回“暂无可用字幕”
     if had_success_200 and had_empty_transcript:
         return {
-            "title": None,
-            "description": None,
-            "tags": [],
+            "title": last_title,
+            "description": last_description,
+            "tags": last_tags,
             "subtitles_text": "该视频暂无可用字幕",
             "subtitles_meta": {"source": "rapidapi", "has_timestamps": False},
             "extractor_key": "RapidAPI:youtube-transcript3",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -28,7 +28,11 @@ class Subscription(Base):
 class Task(Base):
     __tablename__ = "tasks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # 内部自增主键（满足你对“id 自增主键”的要求）
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # 给前端/通知链路使用的稳定标识（避免改动 API 路由形态）
+    task_uuid: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
 
     video_url: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)

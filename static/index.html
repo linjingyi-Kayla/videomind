@@ -8,25 +8,25 @@
     <title>VideoRemind</title>
     <style>
       :root{
-        --bg:#ffffff;
+        --bg:#fafafa;
         --text:#111111;
-        --muted:#666666;
+        --muted:#6b6b6b;
         --muted2:#9a9a9a;
-        --border:#eeeeee;
+        --border:rgba(0,0,0,0.06);
       }
 
       body{
         margin:0;
         font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-        background:var(--bg);
+        background: linear-gradient(135deg, #f5f5dc 0%, #e8e8d0 100%);
         color:var(--text);
       }
 
       header{
         position:sticky;
         top:0;
-        background:rgba(255,255,255,0.92);
-        backdrop-filter: blur(10px);
+        background:rgba(255,255,255,0.72);
+        backdrop-filter: blur(14px);
         border-bottom:1px solid var(--border);
         padding:16px;
         display:flex;
@@ -36,18 +36,21 @@
       }
 
       .brand{
-        font-weight:700;
-        letter-spacing:0.2px;
+        font-family:"Playfair Display","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+        font-weight:600;
+        letter-spacing:0.12em;
+        font-size:16px;
       }
 
       .btn{
-        background:#ffffff;
+        background:rgba(255,255,255,0.92);
         color:#000000;
-        border:1px solid #000000;
+        border:1px solid rgba(0,0,0,0.8);
         padding:10px 14px;
         border-radius:8px;
         cursor:pointer;
         font-weight:600;
+        backdrop-filter: blur(10px);
       }
       .btn:disabled{
         opacity:0.6;
@@ -63,20 +66,25 @@
         gap:10px;
         flex-wrap:wrap;
         align-items:center;
-        margin-bottom:12px;
+        margin-bottom:10px;
       }
 
       .search{
         flex: 1;
         min-width: 180px;
+        background: rgba(255,255,255,0.6);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 8px 10px;
+        backdrop-filter: blur(14px);
       }
 
-      input[type="search"], select{
+      input[type="search"]{
         width:100%;
         padding:10px 12px;
-        border:1px solid #eeeeee;
+        border:0;
         border-radius:12px;
-        background:#fff;
+        background: transparent;
         color:#111;
         font-size:14px;
         outline:none;
@@ -88,12 +96,45 @@
 
       select{
         flex: 0 0 140px;
+        padding:10px 12px;
+        border:1px solid var(--border);
+        border-radius:12px;
+        background: rgba(255,255,255,0.65);
+        color:#111;
+        font-size:14px;
+        outline:none;
+      }
+
+      .tagbar{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        margin-bottom:14px;
+        padding:0 2px;
+      }
+      .tag{
+        border:1px solid var(--border);
+        background: rgba(255,255,255,0.65);
+        border-radius:999px;
+        padding:7px 12px;
+        font-size:13px;
+        color:var(--muted);
+        cursor:pointer;
+        user-select:none;
+        transition: transform 0.08s ease, background 0.12s ease, border-color 0.12s ease;
+      }
+      .tag:active{ transform: translateY(1px); }
+      .tag.selected{
+        border-color: rgba(0,0,0,0.18);
+        background: rgba(255,255,255,0.9);
+        color:#111;
+        font-weight:700;
       }
 
       .columns{
         display:grid;
         grid-template-columns:repeat(2, 1fr);
-        gap:16px;
+        gap:14px;
       }
 
       @media (min-width: 1024px){
@@ -101,33 +142,51 @@
       }
 
       .card{
-        background:#ffffff;
-        border:1px solid #eeeeee;
-        border-radius:12px;
-        padding:14px;
-        box-shadow:0 2px 4px rgba(0,0,0,0.05);
+        background:rgba(255,255,255,0.62);
+        border:1px solid rgba(0,0,0,0.04);
+        border-radius:16px;
+        padding:10px;
+        box-shadow:0 6px 18px rgba(0,0,0,0.04);
         position:relative;
+        overflow:hidden;
         display:flex;
         flex-direction:column;
-        min-height:140px;
+        min-height:150px;
+        backdrop-filter: blur(10px);
+      }
+
+      .card::after{
+        content:"";
+        position:absolute;
+        inset:-2px;
+        background:
+          radial-gradient(circle at 15% 10%, rgba(245, 158, 182, 0.28), transparent 55%),
+          radial-gradient(circle at 90% 15%, rgba(157, 215, 214, 0.20), transparent 55%),
+          radial-gradient(circle at 70% 95%, rgba(200, 160, 255, 0.18), transparent 55%);
+        opacity:0.55;
+        pointer-events:none;
+      }
+
+      .card > *{
+        position:relative;
+        z-index:1;
       }
 
       .cover{
         width:100%;
-        height:92px;
+        height:132px;
         object-fit:cover;
-        border-radius:10px;
-        background:#f6f6f7;
-        margin-bottom:10px;
-        border:1px solid #f0f0f0;
+        border-radius:14px;
+        background:rgba(0,0,0,0.03);
+        margin-bottom:8px;
       }
 
       .titleLink{
         color:var(--text);
         text-decoration:none;
-        font-size:14px;
+        font-size:15px;
         font-weight:800;
-        margin-bottom:10px;
+        margin-bottom:8px;
         display:-webkit-box;
         -webkit-line-clamp:2;
         -webkit-box-orient:vertical;
@@ -136,11 +195,15 @@
 
       .meta{
         margin-top:auto;
-        color:var(--muted2);
-        font-size:12px;
+        color:var(--muted);
+        font-size:12.5px;
         display:flex;
         align-items:center;
         gap:6px;
+        padding:8px 10px;
+        border-radius:14px;
+        border:1px solid rgba(0,0,0,0.05);
+        background:rgba(255,255,255,0.55);
       }
 
       .metaBtn{
@@ -162,20 +225,15 @@
       .summary{
         color:var(--muted);
         font-size:13px;
-        line-height:1.45;
+        line-height:1.5;
         white-space:pre-wrap;
-        display:-webkit-box;
-        -webkit-line-clamp:4;
-        -webkit-box-orient:vertical;
         overflow:hidden;
-        max-height:78px;
+        max-height:62px; /* 默认 3 行左右 */
+        transition: max-height 260ms ease;
       }
 
       .summary.expanded{
-        display:block;
-        -webkit-line-clamp:unset;
-        overflow:visible;
-        max-height:none;
+        max-height:240px;
       }
 
       .pill{
@@ -183,21 +241,26 @@
         padding:4px 10px;
         border-radius:999px;
         font-size:12px;
-        border:1px solid var(--border);
-        color:var(--muted2);
+        border:1px solid rgba(0,0,0,0.05);
+        color:#444;
+        font-weight:700;
+        background:rgba(255,255,255,0.55);
         width:fit-content;
       }
       .pill.done{
-        border-color:#d1f5df;
-        color:#2f9c53;
+        border-color:rgba(47,156,83,0.35);
+        background:rgba(47,156,83,0.10);
+        color:#1f7a3b;
       }
       .pill.pending{
-        border-color:#d7e9ff;
-        color:#1d6fd8;
+        border-color:rgba(29,111,216,0.32);
+        background:rgba(29,111,216,0.08);
+        color:#1b56a4;
       }
       .pill.error{
-        border-color:#ffe1e1;
-        color:#d93025;
+        border-color:rgba(217,48,37,0.35);
+        background:rgba(217,48,37,0.08);
+        color:#b42318;
       }
 
       .empty{
@@ -229,10 +292,8 @@
           <option value="done">Done</option>
           <option value="error">Error</option>
         </select>
-        <select id="categoryFilter" aria-label="分类过滤">
-          <option value="all">全部分类</option>
-        </select>
       </div>
+      <div id="categoryTags" class="tagbar" aria-label="分类标签栏"></div>
       <div id="history" class="columns"></div>
       <div id="empty" class="empty" style="display:none;">暂无任务</div>
     </div>
@@ -243,7 +304,9 @@
       const emptyEl = document.getElementById('empty');
       const searchInput = document.getElementById('searchInput');
       const statusFilter = document.getElementById('statusFilter');
-      const categoryFilter = document.getElementById('categoryFilter');
+      const categoryTagsEl = document.getElementById('categoryTags');
+
+      let selectedCategory = 'all';
 
       let lastItems = [];
 
@@ -435,10 +498,9 @@
       }
 
       function displayTitleForTask(it) {
-        // 目前后端（RapidAPI transcript）不返回 title，因此做一个“隐藏 URL + 有可读标题”的兜底
+        // 标题缺失时不再展示视频 ID，统一提示“未命名视频”
         if (it.title) return it.title;
-        const id = extractYouTubeId(it.video_url || '');
-        return id ? `视频 ${id}` : '未命名视频';
+        return '未命名视频';
       }
 
       async function updateRemindAt(taskId, hhmm) {
@@ -456,14 +518,12 @@
 
       async function refreshHistory() {
         const subscriptionId = getSubscriptionId();
-        if (!subscriptionId) {
-          historyEl.innerHTML = '';
-          emptyEl.style.display = '';
-          lastItems = [];
-          return [];
-        }
 
-        const resp = await fetch('/api/history?subscription_id=' + encodeURIComponent(subscriptionId));
+        // 即使本地没有 subscription_id，也让后端根据“最新订阅”兜底返回历史任务
+        const historyUrl = subscriptionId
+          ? '/api/history?subscription_id=' + encodeURIComponent(subscriptionId)
+          : '/api/history';
+        const resp = await fetch(historyUrl);
         if (!resp.ok) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';
@@ -473,13 +533,23 @@
         const items = data.items || [];
         lastItems = items;
 
-        // 动态生成分类下拉
-        const prevCategory = categoryFilter ? categoryFilter.value : 'all';
+        // 动态生成分类标签栏
         const categories = Array.from(new Set((items || []).map((x) => x.category || '未分类'))).sort();
-        categoryFilter.innerHTML = '<option value="all">全部分类</option>' + categories.map((c) => `<option value="${c}">${c}</option>`).join('');
-        if (prevCategory && prevCategory !== 'all') {
-          categoryFilter.value = categories.includes(prevCategory) ? prevCategory : 'all';
-        }
+        if (selectedCategory !== 'all' && !categories.includes(selectedCategory)) selectedCategory = 'all';
+
+        categoryTagsEl.innerHTML = '';
+        const mkTag = (value, label) => {
+          const tag = document.createElement('div');
+          tag.className = 'tag' + (selectedCategory === value ? ' selected' : '');
+          tag.textContent = label;
+          tag.addEventListener('click', () => {
+            selectedCategory = value;
+            refreshHistory().catch(() => {});
+          });
+          return tag;
+        };
+        categoryTagsEl.appendChild(mkTag('all', '全部分类'));
+        for (const c of categories) categoryTagsEl.appendChild(mkTag(c, c));
 
         const filtered = applyFilters(items);
 
@@ -570,7 +640,7 @@
       function applyFilters(items) {
         const q = (searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '');
         const st = statusFilter ? statusFilter.value : 'all';
-        const cat = categoryFilter ? categoryFilter.value : 'all';
+        const cat = selectedCategory || 'all';
 
         return (items || []).filter((it) => {
           if (st !== 'all' && (it.status || '').toLowerCase() !== st) return false;
@@ -597,7 +667,7 @@
 
       if (searchInput) searchInput.addEventListener('input', () => scheduleRerender());
       if (statusFilter) statusFilter.addEventListener('change', () => refreshHistory().catch(() => {}));
-      if (categoryFilter) categoryFilter.addEventListener('change', () => refreshHistory().catch(() => {}));
+      // 分类标签点击后会直接触发 refreshHistory()
 
       notifyBtn.addEventListener('click', async () => {
         notifyBtn.disabled = true;
