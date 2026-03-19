@@ -32,6 +32,7 @@ class Task(Base):
 
     video_url: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     key_points_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

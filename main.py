@@ -68,6 +68,7 @@ class HistoryItem(BaseModel):
     id: str
     video_url: str
     title: Optional[str] = None
+    category: Optional[str] = None
     summary: Optional[str] = None
     key_points: Optional[List[str]] = None
     remind_at_hhmm: Optional[str] = None
@@ -126,6 +127,7 @@ async def _process_task(task_id: str) -> None:
 
         remind_at_dt = _calc_next_remind_datetime(ai.remind_at)
         task.title = extracted.get("title")
+        task.category = ai.category
         task.summary = summary
         task.key_points_json = key_points_json
         task.status = "done"
@@ -370,6 +372,7 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
                     id=t.id,
                     video_url=t.video_url,
                     title=t.title,
+                category=t.category,
                     summary=t.summary,
                     key_points=key_points,
                     remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
@@ -418,6 +421,7 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
             id=task.id,
             video_url=task.video_url,
             title=task.title,
+            category=task.category,
             summary=task.summary,
             key_points=key_points,
             remind_at_hhmm=task.remind_at.strftime("%H:%M") if task.remind_at else None,

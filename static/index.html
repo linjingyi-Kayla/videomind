@@ -58,6 +58,38 @@
         padding:16px;
       }
 
+      .toolbar{
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+        align-items:center;
+        margin-bottom:12px;
+      }
+
+      .search{
+        flex: 1;
+        min-width: 180px;
+      }
+
+      input[type="search"], select{
+        width:100%;
+        padding:10px 12px;
+        border:1px solid #eeeeee;
+        border-radius:12px;
+        background:#fff;
+        color:#111;
+        font-size:14px;
+        outline:none;
+      }
+
+      input[type="search"]::placeholder{
+        color:#b0b0b0;
+      }
+
+      select{
+        flex: 0 0 140px;
+      }
+
       .columns{
         display:grid;
         grid-template-columns:repeat(2, 1fr);
@@ -136,12 +168,14 @@
         -webkit-line-clamp:4;
         -webkit-box-orient:vertical;
         overflow:hidden;
+        max-height:78px;
       }
 
       .summary.expanded{
         display:block;
         -webkit-line-clamp:unset;
         overflow:visible;
+        max-height:none;
       }
 
       .pill{
@@ -185,6 +219,20 @@
     </header>
 
     <div class="content">
+      <div class="toolbar">
+        <div class="search">
+          <input id="searchInput" type="search" placeholder="搜索标题/总结" />
+        </div>
+        <select id="statusFilter" aria-label="状态过滤">
+          <option value="all">全部</option>
+          <option value="pending">Pending</option>
+          <option value="done">Done</option>
+          <option value="error">Error</option>
+        </select>
+        <select id="categoryFilter" aria-label="分类过滤">
+          <option value="all">全部分类</option>
+        </select>
+      </div>
       <div id="history" class="columns"></div>
       <div id="empty" class="empty" style="display:none;">暂无任务</div>
     </div>
@@ -193,6 +241,11 @@
       const notifyBtn = document.getElementById('notifyBtn');
       const historyEl = document.getElementById('history');
       const emptyEl = document.getElementById('empty');
+      const searchInput = document.getElementById('searchInput');
+      const statusFilter = document.getElementById('statusFilter');
+      const categoryFilter = document.getElementById('categoryFilter');
+
+      let lastItems = [];
 
       function getSubscriptionId() {
         return localStorage.getItem('subscription_id');
@@ -265,6 +318,101 @@
         return pill;
       }
 
+      function makeTimePickerOverlay(taskId, initial, onSave) {
+        const overlay = document.createElement('div');
+        overlay.id = 'vm-time-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0,0,0,0.35)';
+        overlay.style.zIndex = '99999';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'flex-end';
+        overlay.style.justifyContent = 'center';
+        overlay.style.padding = '12px';
+
+        const sheet = document.createElement('div');
+        sheet.style.width = '100%';
+        sheet.style.maxWidth = '420px';
+        sheet.style.background = '#ffffff';
+        sheet.style.borderRadius = '16px';
+        sheet.style.padding = '12px';
+        sheet.style.boxShadow = '0 10px 30px rgba(0,0,0,0.15)';
+
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.marginBottom = '10px';
+
+        const title = document.createElement('div');
+        title.style.fontWeight = '800';
+        title.textContent = '修改提醒时间';
+
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = '取消';
+        cancel.style.border = '1px solid #eee';
+        cancel.style.background = '#fff';
+        cancel.style.borderRadius = '10px';
+        cancel.style.padding = '8px 10px';
+        cancel.style.cursor = 'pointer';
+        cancel.addEventListener('click', () => overlay.remove());
+
+        header.appendChild(title);
+        header.appendChild(cancel);
+
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '10px';
+
+        const picker = document.createElement('input');
+        picker.type = 'time';
+        picker.value = initial;
+        picker.style.flex = '1';
+        picker.style.padding = '10px 8px';
+        picker.style.border = '1px solid #eee';
+        picker.style.borderRadius = '12px';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.textContent = '保存';
+        saveBtn.style.border = '1px solid #000';
+        saveBtn.style.background = '#000';
+        saveBtn.style.color = '#fff';
+        saveBtn.style.borderRadius = '10px';
+        saveBtn.style.padding = '10px 14px';
+        saveBtn.style.cursor = 'pointer';
+        saveBtn.style.fontWeight = '700';
+        saveBtn.addEventListener('click', async () => {
+          try {
+            await onSave(picker.value);
+            overlay.remove();
+          } catch (e) {
+            alert('更新提醒失败：' + (e && e.message ? e.message : e));
+          }
+        });
+
+        row.appendChild(picker);
+        row.appendChild(saveBtn);
+
+        sheet.appendChild(header);
+        sheet.appendChild(row);
+        overlay.appendChild(sheet);
+
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) overlay.remove();
+        });
+
+        document.body.appendChild(overlay);
+        setTimeout(() => {
+          try {
+            if (typeof picker.showPicker === 'function') picker.showPicker();
+          } catch (e) {}
+          picker.focus();
+        }, 0);
+      }
+
       function extractYouTubeId(url) {
         try {
           const u = new URL(url);
@@ -311,6 +459,7 @@
         if (!subscriptionId) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';
+          lastItems = [];
           return [];
         }
 
@@ -322,9 +471,20 @@
         }
         const data = await resp.json();
         const items = data.items || [];
+        lastItems = items;
+
+        // 动态生成分类下拉
+        const prevCategory = categoryFilter ? categoryFilter.value : 'all';
+        const categories = Array.from(new Set((items || []).map((x) => x.category || '未分类'))).sort();
+        categoryFilter.innerHTML = '<option value="all">全部分类</option>' + categories.map((c) => `<option value="${c}">${c}</option>`).join('');
+        if (prevCategory && prevCategory !== 'all') {
+          categoryFilter.value = categories.includes(prevCategory) ? prevCategory : 'all';
+        }
+
+        const filtered = applyFilters(items);
 
         historyEl.innerHTML = '';
-        emptyEl.style.display = items.length ? 'none' : '';
+        emptyEl.style.display = filtered.length ? 'none' : '';
 
         const alarmSvg = `
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -336,7 +496,7 @@
           </svg>
         `.trim();
 
-        for (const it of items) {
+        for (const it of filtered) {
           const card = document.createElement('div');
           card.className = 'card';
           card.dataset.taskId = it.id;
@@ -390,47 +550,54 @@
           meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at_hhmm || '未设置') + '</span>';
           card.appendChild(meta);
 
-          // 时间选择器（原生 time input）
+          // 时间选择器：用遮罩底部弹出，iOS 上交互更稳定
           meta.addEventListener('click', async (e) => {
             e.stopPropagation();
             const taskId = it.id;
             const initial = it.remind_at_hhmm || '18:30';
-
-            let picker = document.getElementById('timePicker');
-            if (!picker) {
-              picker = document.createElement('input');
-              picker.id = 'timePicker';
-              picker.type = 'time';
-              picker.style.position = 'fixed';
-              picker.style.left = '-9999px';
-              picker.style.top = '0';
-              document.body.appendChild(picker);
-            }
-
-            picker.value = initial;
-
-            const onChange = async () => {
-              picker.removeEventListener('change', onChange);
-              try {
-                const hhmm = picker.value;
-                await updateRemindAt(taskId, hhmm);
-                await refreshHistory();
-              } catch (err) {
-                alert('更新提醒失败：' + (err && err.message ? err.message : err));
-              }
-            };
-
-            picker.addEventListener('change', onChange, { once: true });
-            // Safari iOS 支持 showPicker 的概率较高；不支持就 fallback focus
-            if (typeof picker.showPicker === 'function') picker.showPicker();
-            picker.focus();
+            makeTimePickerOverlay(taskId, initial, async (hhmm) => {
+              await updateRemindAt(taskId, hhmm);
+              await refreshHistory();
+            });
           });
 
           historyEl.appendChild(card);
         }
 
-        return items;
+        return filtered;
       }
+
+      function applyFilters(items) {
+        const q = (searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '');
+        const st = statusFilter ? statusFilter.value : 'all';
+        const cat = categoryFilter ? categoryFilter.value : 'all';
+
+        return (items || []).filter((it) => {
+          if (st !== 'all' && (it.status || '').toLowerCase() !== st) return false;
+          if (cat !== 'all') {
+            const itemCat = it.category || '未分类';
+            if (itemCat !== cat) return false;
+          }
+          if (q) {
+            const hay = `${it.title || ''} ${it.summary || ''} ${it.video_url || ''}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+          }
+          return true;
+        });
+      }
+
+      // 用户手动筛选时立即刷新渲染（不重新请求）
+      let rerenderTimer = null;
+      function scheduleRerender() {
+        if (rerenderTimer) clearTimeout(rerenderTimer);
+        rerenderTimer = setTimeout(() => {
+          refreshHistory().catch(() => {});
+        }, 300);
+      }
+
+      if (searchInput) searchInput.addEventListener('input', () => scheduleRerender());
+      if (statusFilter) statusFilter.addEventListener('change', () => refreshHistory().catch(() => {}));
+      if (categoryFilter) categoryFilter.addEventListener('change', () => refreshHistory().catch(() => {}));
 
       notifyBtn.addEventListener('click', async () => {
         notifyBtn.disabled = true;

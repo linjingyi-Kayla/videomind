@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .db_models import Base
@@ -38,6 +39,12 @@ engine, SessionLocal = create_engine_and_session()
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    # 兼容已有 SQLite 表：如果 tasks 表缺少 category 列则补齐
+    with engine.begin() as conn:
+        rows = conn.execute(text("PRAGMA table_info(tasks)")).fetchall()
+        col_names = {r[1] for r in rows}  # r[1] = name
+        if "category" not in col_names:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN category VARCHAR"))
 
 
 def new_session() -> Session:
