@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#0A84FF" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>VideoRemind</title>
+    <style>
+      :root{
+        --bg:#ffffff;
+        --text:#111111;
+        --muted:#666666;
+        --muted2:#9a9a9a;
+        --border:#eeeeee;
+      }
+
+      body{
+        margin:0;
+        font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+        background:var(--bg);
+        color:var(--text);
+      }
+
+      header{
+        position:sticky;
+        top:0;
+        background:rgba(255,255,255,0.92);
+        backdrop-filter: blur(10px);
+        border-bottom:1px solid var(--border);
+        padding:16px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+      }
+
+      .brand{
+        font-weight:700;
+        letter-spacing:0.2px;
+      }
+
+      .btn{
+        background:#ffffff;
+        color:#000000;
+        border:1px solid #000000;
+        padding:10px 14px;
+        border-radius:8px;
+        cursor:pointer;
+        font-weight:600;
+      }
+      .btn:disabled{
+        opacity:0.6;
+        cursor:not-allowed;
+      }
+
+      .content{
+        padding:16px;
+      }
+
+      .columns{
+        display:grid;
+        grid-template-columns:repeat(2, 1fr);
+        gap:16px;
+      }
+
+      .card{
+        background:#ffffff;
+        border:1px solid #eeeeee;
+        border-radius:12px;
+        padding:14px;
+        box-shadow:0 2px 4px rgba(0,0,0,0.05);
+        display:flex;
+        flex-direction:column;
+        min-height:140px;
+      }
+
+      .meta{
+        margin-top:auto;
+        color:var(--muted2);
+        font-size:12px;
+        display:flex;
+        align-items:center;
+        gap:6px;
+      }
+
+      .title{
+        font-size:14px;
+        font-weight:800;
+        margin-bottom:10px;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+      }
+
+      .summary{
+        color:var(--muted);
+        font-size:13px;
+        line-height:1.45;
+        white-space:pre-wrap;
+        display:-webkit-box;
+        -webkit-line-clamp:3;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+      }
+
+      .pill{
+        display:inline-block;
+        padding:4px 10px;
+        border-radius:999px;
+        font-size:12px;
+        border:1px solid var(--border);
+        color:var(--muted2);
+        margin-top:10px;
+        width:fit-content;
+      }
+      .pill.done{
+        border-color:#d1f5df;
+        color:#2f9c53;
+      }
+      .pill.pending{
+        border-color:#d7e9ff;
+        color:#1d6fd8;
+      }
+      .pill.error{
+        border-color:#ffe1e1;
+        color:#d93025;
+      }
+
+      .empty{
+        color:var(--muted2);
+        padding:18px;
+        text-align:center;
+        font-size:14px;
+      }
+
+      @media (max-width: 640px){
+        .columns{ grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">VideoRemind</div>
+      <button id="notifyBtn" class="btn">开启手机提醒</button>
+    </header>
+
+    <div class="content">
+      <div id="history" class="columns"></div>
+      <div id="empty" class="empty" style="display:none;">暂无任务</div>
+    </div>
+
+    <script>
+      const notifyBtn = document.getElementById('notifyBtn');
+      const historyEl = document.getElementById('history');
+      const emptyEl = document.getElementById('empty');
+
+      function getSubscriptionId() {
+        return localStorage.getItem('subscription_id');
+      }
+
+      function setSubscriptionId(id) {
+        localStorage.setItem('subscription_id', id);
+      }
+
+      function base64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+        return outputArray;
+      }
+
+      async function fetchVapidPublicKey() {
+        const resp = await fetch('/api/vapid-public-key');
+        const data = await resp.json();
+        return data.publicKey;
+      }
+
+      async function subscribePush() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          alert('当前浏览器不支持 Web Push');
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          alert('通知权限未开启');
+          return;
+        }
+
+        const reg = await navigator.serviceWorker.ready;
+        const publicKey = await fetchVapidPublicKey();
+
+        const applicationServerKey = base64ToUint8Array(publicKey);
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        });
+
+        const resp = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub)
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'subscribe failed');
+        }
+        const data = await resp.json();
+        setSubscriptionId(data.subscription_id);
+        await refreshHistory();
+      }
+
+      function renderStatusPill(status) {
+        const pill = document.createElement('div');
+        if (status === 'done') pill.className = 'pill done';
+        else if (status === 'error') pill.className = 'pill error';
+        else pill.className = 'pill pending';
+        pill.textContent = status || 'pending';
+        return pill;
+      }
+
+      async function refreshHistory() {
+        const subscriptionId = getSubscriptionId();
+        if (!subscriptionId) {
+          historyEl.innerHTML = '';
+          emptyEl.style.display = '';
+          return;
+        }
+
+        const resp = await fetch('/api/history?subscription_id=' + encodeURIComponent(subscriptionId));
+        if (!resp.ok) {
+          historyEl.innerHTML = '';
+          emptyEl.style.display = '';
+          return;
+        }
+        const data = await resp.json();
+        const items = data.items || [];
+
+        historyEl.innerHTML = '';
+        emptyEl.style.display = items.length ? 'none' : '';
+
+        const alarmSvg = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2Z" fill="#9a9a9a"/>
+            <path d="M6.88 6.31 5.64 5.07a1 1 0 0 0-1.41 1.41l1.24 1.24A9.96 9.96 0 0 0 2 13h2c0-1.81.65-3.47 1.73-4.78Z" fill="#9a9a9a" opacity="0.35"/>
+            <path d="M17.12 17.69 18.36 18.93a1 1 0 0 0 1.41-1.41l-1.24-1.24A9.96 9.96 0 0 0 22 11h-2c0 1.81-.65 3.47-1.73 4.78Z" fill="#9a9a9a" opacity="0.35"/>
+            <path d="M12 8v5l3 2" stroke="#9a9a9a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 2a10 10 0 0 0-7.07 17.07A10 10 0 1 0 12 2Z" stroke="#9a9a9a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        `.trim();
+
+        for (const it of items) {
+          const card = document.createElement('div');
+          card.className = 'card';
+
+          const title = document.createElement('div');
+          title.className = 'title';
+          title.textContent = it.title || it.video_url;
+          card.appendChild(title);
+
+          card.appendChild(renderStatusPill(it.status));
+
+          if (it.summary) {
+            const summary = document.createElement('div');
+            summary.className = 'summary';
+            summary.textContent = it.summary;
+            card.appendChild(summary);
+          }
+
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at || '未设置') + '</span>';
+          card.appendChild(meta);
+
+          historyEl.appendChild(card);
+        }
+      }
+
+      notifyBtn.addEventListener('click', async () => {
+        notifyBtn.disabled = true;
+        try {
+          await subscribePush();
+        } catch (e) {
+          alert('订阅失败：' + (e && e.message ? e.message : e));
+        } finally {
+          notifyBtn.disabled = false;
+        }
+      });
+
+      // service-worker 可能需要显式注册；如果已注册不会重复生效
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js').catch(console.error);
+      }
+
+      refreshHistory().catch(console.error);
+    </script>
+  </body>
+</html>
+
