@@ -199,17 +199,46 @@ async def _send_due_tasks_loop() -> None:
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return JSONResponse({"ok": False, "error": "index.html not found"}, status_code=404)
 
 
 @app.get("/manifest.json", include_in_schema=False)
 async def manifest_json() -> FileResponse:
-    return FileResponse(str(ROOT_MANIFEST), media_type="application/manifest+json")
+    # Railway 运行时的工作目录可能与本地不同；这里做兜底，确保 manifest 一定可返回
+    if ROOT_MANIFEST.exists():
+        return FileResponse(str(ROOT_MANIFEST), media_type="application/manifest+json")
+    static_manifest = STATIC_DIR / "manifest.json"
+    if static_manifest.exists():
+        return FileResponse(str(static_manifest), media_type="application/manifest+json")
+    # 最小兜底：避免 500
+    return JSONResponse(
+        {
+            "name": "VideoRemind",
+            "short_name": "VideoRemind",
+            "start_url": "/",
+            "display": "standalone",
+            "icons": [],
+            "share_target": {
+                "action": "/api/share-target",
+                "method": "POST",
+                "enctype": "multipart/form-data",
+                "params": {"url": "url"},
+            },
+        }
+    )
 
 
 @app.get("/service-worker.js", include_in_schema=False)
 async def service_worker_js() -> FileResponse:
-    return FileResponse(str(ROOT_SERVICE_WORKER), media_type="application/javascript")
+    if ROOT_SERVICE_WORKER.exists():
+        return FileResponse(str(ROOT_SERVICE_WORKER), media_type="application/javascript")
+    static_sw = STATIC_DIR.parent / "service-worker.js"
+    if static_sw.exists():
+        return FileResponse(str(static_sw), media_type="application/javascript")
+    return JSONResponse({"ok": True})
 
 
 @app.get("/favicon.ico", include_in_schema=False)
