@@ -64,15 +64,42 @@
         gap:16px;
       }
 
+      @media (min-width: 1024px){
+        .columns{ grid-template-columns:repeat(3, 1fr); }
+      }
+
       .card{
         background:#ffffff;
         border:1px solid #eeeeee;
         border-radius:12px;
         padding:14px;
         box-shadow:0 2px 4px rgba(0,0,0,0.05);
+        position:relative;
         display:flex;
         flex-direction:column;
         min-height:140px;
+      }
+
+      .cover{
+        width:100%;
+        height:92px;
+        object-fit:cover;
+        border-radius:10px;
+        background:#f6f6f7;
+        margin-bottom:10px;
+        border:1px solid #f0f0f0;
+      }
+
+      .titleLink{
+        color:var(--text);
+        text-decoration:none;
+        font-size:14px;
+        font-weight:800;
+        margin-bottom:10px;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
       }
 
       .meta{
@@ -83,6 +110,12 @@
         align-items:center;
         gap:6px;
       }
+
+      .metaBtn{
+        cursor:pointer;
+        user-select:none;
+      }
+      .metaBtn:active{ transform: translateY(1px); }
 
       .title{
         font-size:14px;
@@ -100,9 +133,15 @@
         line-height:1.45;
         white-space:pre-wrap;
         display:-webkit-box;
-        -webkit-line-clamp:3;
+        -webkit-line-clamp:4;
         -webkit-box-orient:vertical;
         overflow:hidden;
+      }
+
+      .summary.expanded{
+        display:block;
+        -webkit-line-clamp:unset;
+        overflow:visible;
       }
 
       .pill{
@@ -112,7 +151,6 @@
         font-size:12px;
         border:1px solid var(--border);
         color:var(--muted2);
-        margin-top:10px;
         width:fit-content;
       }
       .pill.done{
@@ -220,7 +258,52 @@
         else if (status === 'error') pill.className = 'pill error';
         else pill.className = 'pill pending';
         pill.textContent = status || 'pending';
+        pill.style.position = 'absolute';
+        pill.style.top = '12px';
+        pill.style.right = '12px';
+        pill.addEventListener('click', (e) => e.stopPropagation());
         return pill;
+      }
+
+      function extractYouTubeId(url) {
+        try {
+          const u = new URL(url);
+          if (u.hostname.includes('youtu.be')) return u.pathname.replace('/', '').split('/')[0];
+          const v = u.searchParams.get('v');
+          if (v) return v;
+          const parts = u.pathname.split('/').filter(Boolean);
+          if (parts[0] === 'shorts' || parts[0] === 'live') return parts[1] || null;
+          return null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function coverForVideoUrl(videoUrl) {
+        const id = extractYouTubeId(videoUrl || '');
+        if (!id) return '';
+        // 使用 YouTube 静态封面：不需要额外 API
+        return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+      }
+
+      function displayTitleForTask(it) {
+        // 目前后端（RapidAPI transcript）不返回 title，因此做一个“隐藏 URL + 有可读标题”的兜底
+        if (it.title) return it.title;
+        const id = extractYouTubeId(it.video_url || '');
+        return id ? `视频 ${id}` : '未命名视频';
+      }
+
+      async function updateRemindAt(taskId, hhmm) {
+        const resp = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remind_at: hhmm })
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || '更新提醒失败');
+        }
+        return await resp.json();
       }
 
       async function refreshHistory() {
@@ -256,11 +339,34 @@
         for (const it of items) {
           const card = document.createElement('div');
           card.className = 'card';
+          card.dataset.taskId = it.id;
 
           const title = document.createElement('div');
-          title.className = 'title';
-          title.textContent = it.title || it.video_url;
-          card.appendChild(title);
+          const titleText = displayTitleForTask(it);
+          const videoUrl = it.video_url || '';
+
+          const coverUrl = coverForVideoUrl(videoUrl);
+          if (coverUrl) {
+            const img = document.createElement('img');
+            img.className = 'cover';
+            img.loading = 'lazy';
+            img.alt = titleText;
+            img.src = coverUrl;
+            img.style.cursor = 'pointer';
+            img.addEventListener('click', (e) => {
+              e.stopPropagation();
+              window.location.href = videoUrl;
+            });
+            card.appendChild(img);
+          }
+
+          const titleLink = document.createElement('a');
+          titleLink.className = 'titleLink';
+          titleLink.textContent = titleText;
+          titleLink.href = videoUrl;
+          titleLink.target = '_blank';
+          titleLink.addEventListener('click', (e) => e.stopPropagation());
+          card.appendChild(titleLink);
 
           card.appendChild(renderStatusPill(it.status));
 
@@ -269,12 +375,56 @@
             summary.className = 'summary';
             summary.textContent = it.summary;
             card.appendChild(summary);
+
+            // 点击卡片展开/收起总结（除非点到标题/封面/时间）
+            card.addEventListener('click', () => {
+              const expanded = summary.classList.toggle('expanded');
+              // 可选：记录展开状态到 dataset
+              card.dataset.expanded = expanded ? '1' : '0';
+            });
           }
 
           const meta = document.createElement('div');
           meta.className = 'meta';
-          meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at || '未设置') + '</span>';
+          meta.classList.add('metaBtn');
+          meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at_hhmm || '未设置') + '</span>';
           card.appendChild(meta);
+
+          // 时间选择器（原生 time input）
+          meta.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const taskId = it.id;
+            const initial = it.remind_at_hhmm || '18:30';
+
+            let picker = document.getElementById('timePicker');
+            if (!picker) {
+              picker = document.createElement('input');
+              picker.id = 'timePicker';
+              picker.type = 'time';
+              picker.style.position = 'fixed';
+              picker.style.left = '-9999px';
+              picker.style.top = '0';
+              document.body.appendChild(picker);
+            }
+
+            picker.value = initial;
+
+            const onChange = async () => {
+              picker.removeEventListener('change', onChange);
+              try {
+                const hhmm = picker.value;
+                await updateRemindAt(taskId, hhmm);
+                await refreshHistory();
+              } catch (err) {
+                alert('更新提醒失败：' + (err && err.message ? err.message : err));
+              }
+            };
+
+            picker.addEventListener('change', onChange, { once: true });
+            // Safari iOS 支持 showPicker 的概率较高；不支持就 fallback focus
+            if (typeof picker.showPicker === 'function') picker.showPicker();
+            picker.focus();
+          });
 
           historyEl.appendChild(card);
         }

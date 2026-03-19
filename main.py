@@ -70,7 +70,7 @@ class HistoryItem(BaseModel):
     title: Optional[str] = None
     summary: Optional[str] = None
     key_points: Optional[List[str]] = None
-    remind_at: Optional[datetime] = None
+    remind_at_hhmm: Optional[str] = None
     is_notified: bool
     status: str
     created_at: datetime
@@ -129,7 +129,7 @@ async def _process_task(task_id: str) -> None:
         task.summary = summary
         task.key_points_json = key_points_json
         task.status = "done"
-        task.remind_at = remind_at_dt
+        task.remind_at = remind_at_dt.replace(tzinfo=None)
         task.is_notified = False
         task.error_message = None
         session.commit()
@@ -333,13 +333,59 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
                     title=t.title,
                     summary=t.summary,
                     key_points=key_points,
-                    remind_at=t.remind_at,
+                    remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
                     is_notified=bool(t.is_notified),
                     status=t.status,
                     created_at=t.created_at,
                 )
             )
         return HistoryResponse(subscription_id=subscription_id, items=out)
+    finally:
+        session.close()
+
+
+class UpdateRemindAtRequest(BaseModel):
+    remind_at: str  # "HH:MM"
+
+
+@app.post("/api/tasks/{task_id}/remind-at", response_model=HistoryItem)
+async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> HistoryItem:
+    """
+    更新某个任务的提醒时间（HH:MM），并将 is_notified=false 以便 scheduler 再次推送。
+    """
+    session = new_session()
+    try:
+        task = session.get(Task, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="task_id 不存在")
+        if task.subscription_id is None:
+            # per_subscription 模式下，MVP 保守限制：必须先绑定订阅
+            # 这里不强制，但至少确保字段存在以便前端按历史归类
+            pass
+
+        task.remind_at = _calc_next_remind_datetime(req.remind_at).replace(tzinfo=None)
+        task.is_notified = False
+        task.status = task.status if task.status in {"done", "error"} else "done"
+        session.commit()
+
+        key_points = None
+        if task.key_points_json:
+            try:
+                key_points = json.loads(task.key_points_json)
+            except Exception:
+                key_points = None
+
+        return HistoryItem(
+            id=task.id,
+            video_url=task.video_url,
+            title=task.title,
+            summary=task.summary,
+            key_points=key_points,
+            remind_at_hhmm=task.remind_at.strftime("%H:%M") if task.remind_at else None,
+            is_notified=bool(task.is_notified),
+            status=task.status,
+            created_at=task.created_at,
+        )
     finally:
         session.close()
 
