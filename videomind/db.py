@@ -70,6 +70,60 @@ def init_db() -> None:
                         )
                     )
                     conn.execute(text("DROP TABLE tasks_old"))
+            elif "task_uuid" not in cols and engine.dialect.name.startswith("postgres"):
+                # Postgres 升级兼容：如果旧 tasks 没有 task_uuid，则用旧 id 填充 task_uuid
+                old_cols = set(cols)
+
+                def _expr(col: str, fallback: str = "NULL") -> str:
+                    return col if col in old_cols else fallback
+
+                video_url_expr = _expr("video_url")
+                title_expr = _expr("title")
+                category_expr = _expr("category")
+                summary_expr = _expr("summary")
+                key_points_expr = _expr("key_points_json")
+                remind_at_expr = _expr("remind_at")
+                is_notified_expr = _expr("is_notified")
+                status_expr = _expr("status")
+                error_message_expr = _expr("error_message")
+                subscription_id_expr = _expr("subscription_id")
+                created_at_expr = _expr("created_at")
+                updated_at_expr = _expr("updated_at")
+
+                with engine.begin() as conn:
+                    conn.execute(text("DROP TABLE IF EXISTS tasks_old"))
+                    conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
+
+                Base.metadata.create_all(bind=engine)
+
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"""
+                            INSERT INTO tasks (
+                              task_uuid, video_url, title, category, summary, key_points_json,
+                              remind_at, is_notified, status, error_message, subscription_id,
+                              created_at, updated_at
+                            )
+                            SELECT
+                              id::text as task_uuid,
+                              {video_url_expr},
+                              {title_expr},
+                              {category_expr},
+                              {summary_expr},
+                              {key_points_expr},
+                              {remind_at_expr},
+                              {is_notified_expr},
+                              {status_expr},
+                              {error_message_expr},
+                              {subscription_id_expr},
+                              {created_at_expr},
+                              {updated_at_expr}
+                            FROM tasks_old
+                            """
+                        )
+                    )
+                    conn.execute(text("DROP TABLE tasks_old"))
             else:
                 Base.metadata.create_all(bind=engine)
         else:
