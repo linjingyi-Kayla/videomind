@@ -74,9 +74,16 @@ class HistoryItem(BaseModel):
     remind_at_hhmm: Optional[str] = None
     # 已到提醒时间但仍未推送（用于前端站内 Modal 兜底）
     remind_due_pending: bool = False
+    is_favorite: bool = False
+    annotation: Optional[str] = None
     is_notified: bool
     status: str
     created_at: datetime
+
+
+class TaskPatchRequest(BaseModel):
+    is_favorite: Optional[bool] = None
+    annotation: Optional[str] = None
 
 
 class HistoryResponse(BaseModel):
@@ -86,6 +93,34 @@ class HistoryResponse(BaseModel):
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _history_item_from_task(t: Task) -> HistoryItem:
+    key_points = None
+    if t.key_points_json:
+        try:
+            key_points = json.loads(t.key_points_json)
+        except Exception:
+            key_points = None
+    now_naive = _now_utc().replace(tzinfo=None)
+    due_pending = bool(
+        t.remind_at and t.status == "done" and not t.is_notified and t.remind_at <= now_naive
+    )
+    return HistoryItem(
+        id=t.task_uuid,
+        video_url=t.video_url,
+        title=t.title,
+        category=t.category,
+        summary=t.summary,
+        key_points=key_points,
+        remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
+        remind_due_pending=due_pending,
+        is_favorite=bool(getattr(t, "is_favorite", False)),
+        annotation=getattr(t, "annotation", None),
+        is_notified=bool(t.is_notified),
+        status=t.status,
+        created_at=t.created_at,
+    )
 
 
 def _parse_time_hhmm(hhmm: str) -> time:
@@ -248,6 +283,30 @@ async def index() -> FileResponse:
     return JSONResponse({"ok": False, "error": "index.html not found"}, status_code=404)
 
 
+@app.get("/detail", include_in_schema=False)
+async def page_detail() -> FileResponse:
+    p = STATIC_DIR / "detail.html"
+    if p.exists():
+        return FileResponse(str(p))
+    raise HTTPException(status_code=404, detail="detail.html not found")
+
+
+@app.get("/favorites", include_in_schema=False)
+async def page_favorites() -> FileResponse:
+    p = STATIC_DIR / "favorites.html"
+    if p.exists():
+        return FileResponse(str(p))
+    raise HTTPException(status_code=404, detail="favorites.html not found")
+
+
+@app.get("/profile", include_in_schema=False)
+async def page_profile() -> FileResponse:
+    p = STATIC_DIR / "profile.html"
+    if p.exists():
+        return FileResponse(str(p))
+    raise HTTPException(status_code=404, detail="profile.html not found")
+
+
 @app.get("/manifest.json", include_in_schema=False)
 async def manifest_json() -> FileResponse:
     # Railway 运行时的工作目录可能与本地不同；这里做兜底，确保 manifest 一定可返回
@@ -399,38 +458,9 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
             q3 = select(Task).order_by(desc(Task.created_at)).limit(50)
             items = session.execute(q3).scalars().all()
 
-        now_naive = _now_utc().replace(tzinfo=None)
         out: List[HistoryItem] = []
         for t in items:
-            key_points = None
-            if t.key_points_json:
-                try:
-                    key_points = json.loads(t.key_points_json)
-                except Exception:
-                    key_points = None
-
-            due_pending = bool(
-                t.remind_at
-                and t.status == "done"
-                and not t.is_notified
-                and t.remind_at <= now_naive
-            )
-
-            out.append(
-                HistoryItem(
-                    id=t.task_uuid,
-                    video_url=t.video_url,
-                    title=t.title,
-                    category=t.category,
-                    summary=t.summary,
-                    key_points=key_points,
-                    remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
-                    remind_due_pending=due_pending,
-                    is_notified=bool(t.is_notified),
-                    status=t.status,
-                    created_at=t.created_at,
-                )
-            )
+            out.append(_history_item_from_task(t))
         return HistoryResponse(subscription_id=target_sid, items=out)
     finally:
         session.close()
@@ -460,33 +490,40 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
         task.status = task.status if task.status in {"done", "error"} else "done"
         session.commit()
 
-        key_points = None
-        if task.key_points_json:
-            try:
-                key_points = json.loads(task.key_points_json)
-            except Exception:
-                key_points = None
+        session.refresh(task)
+        return _history_item_from_task(task)
+    finally:
+        session.close()
 
-        now_naive = _now_utc().replace(tzinfo=None)
-        due_pending = bool(
-            task.remind_at
-            and task.status == "done"
-            and not task.is_notified
-            and task.remind_at <= now_naive
-        )
-        return HistoryItem(
-            id=task.task_uuid,
-            video_url=task.video_url,
-            title=task.title,
-            category=task.category,
-            summary=task.summary,
-            key_points=key_points,
-            remind_at_hhmm=task.remind_at.strftime("%H:%M") if task.remind_at else None,
-            remind_due_pending=due_pending,
-            is_notified=bool(task.is_notified),
-            status=task.status,
-            created_at=task.created_at,
-        )
+
+@app.get("/api/tasks/{task_id}", response_model=HistoryItem)
+async def get_task(task_id: str) -> HistoryItem:
+    session = new_session()
+    try:
+        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
+        if not task:
+            raise HTTPException(status_code=404, detail="task_id 不存在")
+        return _history_item_from_task(task)
+    finally:
+        session.close()
+
+
+@app.patch("/api/tasks/{task_id}", response_model=HistoryItem)
+async def patch_task(task_id: str, req: TaskPatchRequest) -> HistoryItem:
+    """更新收藏、批注等字段。"""
+    session = new_session()
+    try:
+        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
+        if not task:
+            raise HTTPException(status_code=404, detail="task_id 不存在")
+        if req.is_favorite is not None:
+            task.is_favorite = bool(req.is_favorite)
+        if req.annotation is not None:
+            task.annotation = req.annotation
+        task.updated_at = _now_utc().replace(tzinfo=None)
+        session.commit()
+        session.refresh(task)
+        return _history_item_from_task(task)
     finally:
         session.close()
 

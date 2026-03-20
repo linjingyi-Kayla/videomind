@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#faf8f3" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>收藏 · VideoMind</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: linear-gradient(160deg, #faf8f3 0%, #e8e2d6 100%);
+        color: #1a1a1a;
+        padding-bottom: 88px;
+      }
+      header {
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(250, 248, 243, 0.9);
+        backdrop-filter: blur(12px);
+      }
+      .brand {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+      }
+      .content {
+        padding: 12px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .columns {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+      @media (min-width: 1024px) {
+        .columns {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      .card {
+        background: linear-gradient(165deg, #f3efe6, #ebe4d8);
+        border-radius: 18px;
+        padding: 14px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+        align-self: start;
+      }
+      .card a {
+        color: inherit;
+        text-decoration: none;
+        font-weight: 800;
+        font-size: 14px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .card p {
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: #666;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .empty {
+        text-align: center;
+        color: #888;
+        padding: 40px 16px;
+      }
+      .bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 80;
+        display: flex;
+        justify-content: space-around;
+        padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+        background: rgba(250, 248, 243, 0.94);
+        backdrop-filter: blur(14px);
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .bottom-nav a {
+        flex: 1;
+        text-align: center;
+        text-decoration: none;
+        color: #555;
+        font-size: 11px;
+        padding: 6px 4px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .bottom-nav a.active {
+        color: #111;
+        font-weight: 800;
+      }
+      .bottom-nav svg {
+        width: 24px;
+        height: 24px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="brand">收藏</span>
+      <a href="/" style="font-size: 14px; color: #333">回首页</a>
+    </header>
+    <div class="content">
+      <div id="list" class="columns"></div>
+      <div id="empty" class="empty" style="display: none">暂无收藏，在详情页点击「收藏」即可加入</div>
+    </div>
+    <nav class="bottom-nav" aria-label="主导航">
+      <a href="/">
+        <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round" /></svg>
+        主页
+      </a>
+      <a href="/favorites" class="active">
+        <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.35-9-8.5C1.5 9 3 6 6.5 6 9 6 11 8 12 9.5 13 8 15 6 17.5 6 21 9 22.5 12 21z" stroke-linejoin="round" /></svg>
+        收藏
+      </a>
+      <a href="/profile">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M6 20v-1c0-2.5 2-4 6-4s6 1.5 6 4v1" stroke-linecap="round" /></svg>
+        我的
+      </a>
+    </nav>
+    <script>
+      const fetchOpts = { cache: "no-store", headers: { "Cache-Control": "no-cache" } };
+      async function load() {
+        const sub = localStorage.getItem("subscription_id");
+        const url = sub ? "/api/history?subscription_id=" + encodeURIComponent(sub) : "/api/history";
+        const resp = await fetch(url, fetchOpts);
+        const data = await resp.json();
+        const items = (data.items || []).filter((x) => x.is_favorite);
+        const list = document.getElementById("list");
+        const empty = document.getElementById("empty");
+        list.innerHTML = "";
+        if (!items.length) {
+          empty.style.display = "";
+          return;
+        }
+        empty.style.display = "none";
+        items.forEach((it) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          const a = document.createElement("a");
+          a.href = "/detail?id=" + encodeURIComponent(it.id);
+          a.textContent = it.title || "未命名视频";
+          const p = document.createElement("p");
+          p.textContent = it.summary || "";
+          card.appendChild(a);
+          card.appendChild(p);
+          list.appendChild(card);
+        });
+      }
+      load().catch(console.error);
+    </script>
+  </body>
+</html>

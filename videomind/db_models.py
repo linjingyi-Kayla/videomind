@@ -52,6 +52,10 @@ class Task(Base):
     # 如果为 None，则表示“未关联订阅”（MVP 可广播或回填到最近订阅）
     subscription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
 
+    # 收藏 / 用户批注（详情页持久化）
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    annotation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

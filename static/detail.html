@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#faf8f3" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>视频详情 · VideoMind</title>
+    <style>
+      :root {
+        --bg: #faf8f3;
+        --text: #1a1a1a;
+        --muted: #5c5c5c;
+        --card: #f3efe6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        background: linear-gradient(160deg, var(--bg) 0%, #e8e2d6 100%);
+        color: var(--text);
+        padding-bottom: 160px;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        background: rgba(250, 248, 243, 0.92);
+        backdrop-filter: blur(12px);
+      }
+      header a.back {
+        text-decoration: none;
+        color: #333;
+        font-weight: 700;
+        font-size: 15px;
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 12px 14px 24px;
+      }
+      .media {
+        aspect-ratio: 16/9;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #e0dcd4;
+        margin-bottom: 14px;
+        position: relative;
+      }
+      .media img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+        position: absolute;
+        inset: 0;
+      }
+      h1 {
+        font-size: 18px;
+        line-height: 1.35;
+        margin: 0 0 10px;
+      }
+      h1 a {
+        color: inherit;
+      }
+      .cat {
+        display: inline-block;
+        font-size: 12px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .summary-full {
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--muted);
+        white-space: pre-wrap;
+        margin-bottom: 16px;
+      }
+      .kp {
+        margin: 0 0 16px;
+        padding: 0 0 0 18px;
+      }
+      .kp li {
+        margin-bottom: 8px;
+        color: var(--text);
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      .btn {
+        border: 0;
+        border-radius: 12px;
+        padding: 10px 16px;
+        font-weight: 700;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .btn-heart {
+        background: rgba(200, 100, 120, 0.2);
+        color: #8a3d4d;
+      }
+      .btn-heart.on {
+        background: rgba(200, 100, 120, 0.45);
+      }
+      .note-label {
+        font-weight: 800;
+        font-size: 14px;
+        margin-bottom: 8px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        border-radius: 14px;
+        border: 0;
+        padding: 12px;
+        font-size: 15px;
+        resize: vertical;
+        background: rgba(255, 255, 255, 0.7);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      }
+      .btn-save {
+        margin-top: 10px;
+        background: #2c2c2c;
+        color: #fff;
+      }
+      .err {
+        color: #b42318;
+        padding: 16px;
+      }
+      .detail-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 72px;
+        z-index: 70;
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        padding: 10px 14px;
+        background: rgba(250, 248, 243, 0.95);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid rgba(0, 0, 0, 0.06);
+      }
+      .bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 80;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+        background: rgba(250, 248, 243, 0.94);
+        backdrop-filter: blur(14px);
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .bottom-nav a {
+        flex: 1;
+        text-align: center;
+        text-decoration: none;
+        color: #555;
+        font-size: 11px;
+        padding: 6px 4px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .bottom-nav a.active {
+        color: #111;
+        font-weight: 800;
+      }
+      .bottom-nav svg {
+        width: 24px;
+        height: 24px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="back" href="/">← 返回</a>
+      <span id="headerTitle" style="font-weight:800;">详情</span>
+    </header>
+    <div class="wrap" id="root">
+      <p class="err" id="err" style="display: none"></p>
+      <div id="content" style="display: none">
+        <div class="media">
+          <img id="cover" alt="" />
+        </div>
+        <div class="cat" id="cat"></div>
+        <h1><a id="titleLink" href="#" target="_blank" rel="noopener"></a></h1>
+        <div class="summary-full" id="summary"></div>
+        <ul class="kp" id="kp"></ul>
+        <div class="actions">
+          <button type="button" class="btn btn-heart" id="btnHeart">♡ 收藏</button>
+          <a class="btn" id="openYt" href="#" target="_blank" rel="noopener" style="background: rgba(0,0,0,0.08); text-decoration: none; color: inherit; display: inline-flex; align-items: center;">在 YouTube 打开</a>
+        </div>
+        <div class="note-label">我的批注</div>
+        <textarea id="note" placeholder="写下你的想法…"></textarea>
+        <button type="button" class="btn btn-save" id="btnSave">保存批注</button>
+      </div>
+    </div>
+
+    <div class="detail-bar" id="detailBar" style="display: none"></div>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <a href="/">
+        <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round" /></svg>
+        主页
+      </a>
+      <a href="/favorites">
+        <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.35-9-8.5C1.5 9 3 6 6.5 6 9 6 11 8 12 9.5 13 8 15 6 17.5 6 21 9 22.5 12 21z" stroke-linejoin="round" /></svg>
+        收藏
+      </a>
+      <a href="/profile">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M6 20v-1c0-2.5 2-4 6-4s6 1.5 6 4v1" stroke-linecap="round" /></svg>
+        我的
+      </a>
+    </nav>
+
+    <script>
+      const fetchOpts = { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } };
+
+      function qs(name) {
+        const u = new URLSearchParams(window.location.search);
+        return u.get(name);
+      }
+
+      function extractYouTubeId(url) {
+        try {
+          const u = new URL(url);
+          if (u.hostname.includes('youtu.be')) return u.pathname.replace('/', '').split('/')[0];
+          const v = u.searchParams.get('v');
+          if (v) return v;
+          const parts = u.pathname.split('/').filter(Boolean);
+          if (parts[0] === 'shorts' || parts[0] === 'live') return parts[1] || null;
+          return null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      const id = qs('id');
+      const errEl = document.getElementById('err');
+      const content = document.getElementById('content');
+
+      async function load() {
+        if (!id) {
+          errEl.style.display = '';
+          errEl.textContent = '缺少任务 id';
+          return;
+        }
+        const resp = await fetch('/api/tasks/' + encodeURIComponent(id), fetchOpts);
+        if (!resp.ok) {
+          errEl.style.display = '';
+          errEl.textContent = '加载失败：' + (await resp.text());
+          return;
+        }
+        const it = await resp.json();
+        errEl.style.display = 'none';
+        content.style.display = '';
+
+        const vid = extractYouTubeId(it.video_url || '');
+        const img = document.getElementById('cover');
+        if (vid) {
+          img.src = 'https://img.youtube.com/vi/' + vid + '/maxresdefault.jpg';
+          img.addEventListener(
+            'error',
+            function once() {
+              img.removeEventListener('error', once);
+              img.src = 'https://img.youtube.com/vi/' + vid + '/hqdefault.jpg';
+            },
+            { once: true }
+          );
+        }
+        img.alt = it.title || '视频';
+
+        document.getElementById('cat').textContent = it.category || '未分类';
+        const tl = document.getElementById('titleLink');
+        tl.textContent = it.title || '未命名视频';
+        tl.href = it.video_url || '#';
+
+        document.getElementById('summary').textContent = it.summary || '（暂无总结）';
+        const kp = document.getElementById('kp');
+        kp.innerHTML = '';
+        (it.key_points || []).forEach((k) => {
+          const li = document.createElement('li');
+          li.textContent = k;
+          kp.appendChild(li);
+        });
+
+        document.getElementById('openYt').href = it.video_url || '#';
+        document.getElementById('note').value = it.annotation || '';
+
+        const heart = document.getElementById('btnHeart');
+        function syncHeart() {
+          heart.classList.toggle('on', !!it.is_favorite);
+          heart.textContent = it.is_favorite ? '♥ 已收藏' : '♡ 收藏';
+        }
+        syncHeart();
+        heart.onclick = async () => {
+          const next = !it.is_favorite;
+          const r = await fetch('/api/tasks/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+            body: JSON.stringify({ is_favorite: next }),
+            cache: 'no-store',
+          });
+          if (r.ok) {
+            const j = await r.json();
+            it.is_favorite = j.is_favorite;
+            syncHeart();
+          }
+        };
+
+        document.getElementById('btnSave').onclick = async () => {
+          const text = document.getElementById('note').value;
+          const r = await fetch('/api/tasks/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+            body: JSON.stringify({ annotation: text }),
+            cache: 'no-store',
+          });
+          if (r.ok) {
+            alert('批注已保存');
+          } else {
+            alert('保存失败');
+          }
+        };
+      }
+
+      load().catch((e) => {
+        errEl.style.display = '';
+        errEl.textContent = String(e);
+      });
+    </script>
+  </body>
+</html>

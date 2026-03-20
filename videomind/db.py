@@ -41,6 +41,26 @@ def create_engine_and_session() -> tuple:
 engine, SessionLocal = create_engine_and_session()
 
 
+def _ensure_task_columns(engine) -> None:
+    """为已存在的 tasks 表补齐 ORM 新增列（不删数据）。"""
+    insp = inspect(engine)
+    if "tasks" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("tasks")}
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if "is_favorite" not in cols:
+            if dialect == "sqlite":
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN is_favorite BOOLEAN DEFAULT 0"))
+            else:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE"))
+        if "annotation" not in cols:
+            if dialect == "sqlite":
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN annotation TEXT"))
+            else:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS annotation TEXT"))
+
+
 def init_db() -> None:
     """
     初始化表结构：始终 create_all（只创建缺失的表/列，不覆盖已有数据）。
@@ -51,6 +71,7 @@ def init_db() -> None:
     try:
         # 先确保 ORM 声明的表存在（只创建缺失对象，不覆盖已有数据）
         Base.metadata.create_all(bind=engine)
+        _ensure_task_columns(engine)
 
         insp = inspect(engine)
         tables = insp.get_table_names()
@@ -144,6 +165,7 @@ def init_db() -> None:
                 conn.execute(text("DROP TABLE tasks_old"))
     except Exception:
         Base.metadata.create_all(bind=engine)
+        _ensure_task_columns(engine)
 
 
 def new_session() -> Session:

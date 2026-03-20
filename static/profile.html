@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#faf8f3" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>我的 · VideoMind</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: linear-gradient(160deg, #faf8f3 0%, #e8e2d6 100%);
+        color: #1a1a1a;
+        padding-bottom: 88px;
+      }
+      header {
+        padding: 18px 16px;
+        background: rgba(250, 248, 243, 0.9);
+        backdrop-filter: blur(12px);
+      }
+      .brand {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+      }
+      .sub {
+        font-size: 13px;
+        color: #777;
+        margin-top: 6px;
+      }
+      .list {
+        max-width: 520px;
+        margin: 16px auto;
+        padding: 0 14px;
+      }
+      .row {
+        display: block;
+        padding: 16px 14px;
+        margin-bottom: 10px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.55);
+        text-decoration: none;
+        color: inherit;
+        font-weight: 600;
+        font-size: 15px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+      }
+      .row span {
+        float: right;
+        color: #aaa;
+        font-weight: 400;
+      }
+      .bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 80;
+        display: flex;
+        justify-content: space-around;
+        padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+        background: rgba(250, 248, 243, 0.94);
+        backdrop-filter: blur(14px);
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .bottom-nav a {
+        flex: 1;
+        text-align: center;
+        text-decoration: none;
+        color: #555;
+        font-size: 11px;
+        padding: 6px 4px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .bottom-nav a.active {
+        color: #111;
+        font-weight: 800;
+      }
+      .bottom-nav svg {
+        width: 24px;
+        height: 24px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">我的</div>
+      <div class="sub">登录与账号能力将在后续版本接入（当前为本地体验版）</div>
+    </header>
+    <div class="list">
+      <a class="row" href="#" onclick="alert('即将支持：使用邮箱或 Apple 登录'); return false;">登录 / 注册 <span>›</span></a>
+      <a class="row" href="#" onclick="alert('设置：通知、主题等即将开放'); return false;">设置 <span>›</span></a>
+      <a class="row" href="#" onclick="alert('帮助中心：\\n1. 将本站添加到主屏幕可提升 iOS 推送到达率\\n2. 提醒依赖服务器与网络，若未收到请查看站内弹窗'); return false;">帮助中心 <span>›</span></a>
+      <a class="row" href="mailto:support@example.com?subject=VideoMind%20反馈">问题反馈 <span>›</span></a>
+    </div>
+    <nav class="bottom-nav" aria-label="主导航">
+      <a href="/">
+        <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round" /></svg>
+        主页
+      </a>
+      <a href="/favorites">
+        <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.35-9-8.5C1.5 9 3 6 6.5 6 9 6 11 8 12 9.5 13 8 15 6 17.5 6 21 9 22.5 12 21z" stroke-linejoin="round" /></svg>
+        收藏
+      </a>
+      <a href="/profile" class="active">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M6 20v-1c0-2.5 2-4 6-4s6 1.5 6 4v1" stroke-linecap="round" /></svg>
+        我的
+      </a>
+    </nav>
+  </body>
+</html>

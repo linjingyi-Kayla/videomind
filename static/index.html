@@ -64,7 +64,7 @@
       }
 
       .content{
-        padding:10px 8px 24px;
+        padding:10px 8px 88px;
         max-width:1200px;
         margin:0 auto;
       }
@@ -134,6 +134,7 @@
         display:grid;
         grid-template-columns:repeat(2, 1fr);
         gap:10px;
+        align-items:start;
       }
 
       @media (min-width: 1024px){
@@ -150,7 +151,9 @@
         overflow:hidden;
         display:flex;
         flex-direction:column;
-        min-height:160px;
+        min-height:0;
+        align-self:start;
+        width:100%;
       }
 
       .card-body{
@@ -166,16 +169,20 @@
         margin:-16px -16px 12px -16px;
         border-radius:18px 18px 0 0;
         overflow:hidden;
-        background:rgba(0,0,0,0.04);
+        background:#e8e4dc;
+        aspect-ratio:16/9;
+        position:relative;
       }
 
       .cover{
         width:100%;
-        height:148px;
+        height:100%;
+        position:absolute;
+        inset:0;
         display:block;
         object-fit:cover;
+        object-position:center;
         border-radius:0;
-        background:rgba(0,0,0,0.03);
       }
 
       .titleLink{
@@ -218,11 +225,13 @@
         white-space:pre-wrap;
         overflow:hidden;
         max-height:62px;
-        transition: max-height 280ms ease;
+        cursor:pointer;
       }
 
-      .card.expanded .summary{
-        max-height:260px;
+      .summary-hint{
+        font-size:11px;
+        color:var(--muted2);
+        margin-top:4px;
       }
 
       .pill{
@@ -294,6 +303,36 @@
       .vm-modal .vm-btn-primary{ background:#2c2c2c; color:#fff; }
       .vm-modal .vm-btn-ghost{ background:rgba(0,0,0,0.06); color:#333; }
 
+      .bottom-nav{
+        position:fixed;
+        left:0;
+        right:0;
+        bottom:0;
+        z-index:80;
+        display:flex;
+        justify-content:space-around;
+        align-items:center;
+        padding:8px 8px calc(10px + env(safe-area-inset-bottom));
+        background:rgba(250,248,243,0.94);
+        backdrop-filter:blur(14px);
+        border-top:1px solid rgba(0,0,0,0.05);
+        box-shadow:0 -4px 20px rgba(0,0,0,0.04);
+      }
+      .bottom-nav a{
+        flex:1;
+        text-align:center;
+        text-decoration:none;
+        color:#555;
+        font-size:11px;
+        padding:6px 4px;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:4px;
+      }
+      .bottom-nav a.active{ color:#111; font-weight:800; }
+      .bottom-nav svg{ width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.8; }
+
       @media (max-width: 640px){
         .columns{ grid-template-columns:repeat(2, 1fr); }
       }
@@ -316,6 +355,21 @@
       <div id="empty" class="empty" style="display:none;">暂无任务</div>
     </div>
     <div id="vmModalRoot" aria-live="polite"></div>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <a href="/" class="active">
+        <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round"/></svg>
+        主页
+      </a>
+      <a href="/favorites">
+        <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.35-9-8.5C1.5 9 3 6 6.5 6 9 6 11 8 12 9.5 13 8 15 6 17.5 6 21 9 22.5 12 21z" stroke-linejoin="round"/></svg>
+        收藏
+      </a>
+      <a href="/profile">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M6 20v-1c0-2.5 2-4 6-4s6 1.5 6 4v1" stroke-linecap="round"/></svg>
+        我的
+      </a>
+    </nav>
 
     <script>
       const notifyBtn = document.getElementById('notifyBtn');
@@ -410,6 +464,14 @@
         const data = await resp.json();
         setSubscriptionId(data.subscription_id);
         toast('提醒已开启，订阅已保存');
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('VideoMind', { body: '测试通知：若能看到本条，说明系统通知通道可用。' });
+          }
+        } catch (e) {}
+        setTimeout(() => {
+          toast('提示：iOS 请将本站「添加到主屏幕」；到期推送依赖网络与系统，后台可能延迟。');
+        }, 400);
         await refreshHistory();
       }
 
@@ -538,8 +600,16 @@
       function coverForVideoUrl(videoUrl) {
         const id = extractYouTubeId(videoUrl || '');
         if (!id) return '';
-        // 使用 YouTube 静态封面：不需要额外 API
-        return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+        return `https://img.youtube.com/vi/${id}/maxresdefault.jpg`;
+      }
+
+      function bindCoverFallback(img, videoUrl) {
+        const id = extractYouTubeId(videoUrl || '');
+        if (!id) return;
+        img.addEventListener('error', function onErr() {
+          img.removeEventListener('error', onErr);
+          img.src = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+        }, { once: true });
       }
 
       function displayTitleForTask(it) {
@@ -703,6 +773,7 @@
             img.loading = 'lazy';
             img.alt = titleText;
             img.src = coverUrl;
+            bindCoverFallback(img, videoUrl);
             img.style.cursor = 'pointer';
             img.addEventListener('click', (e) => {
               e.stopPropagation();
@@ -712,20 +783,34 @@
             body.appendChild(media);
           }
 
+          const goDetail = (e) => {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            window.location.href = '/detail?id=' + encodeURIComponent(it.id);
+          };
+
           const titleLink = document.createElement('a');
           titleLink.className = 'titleLink';
           titleLink.textContent = titleText;
-          titleLink.href = videoUrl;
-          titleLink.target = '_blank';
-          titleLink.rel = 'noopener noreferrer';
-          titleLink.addEventListener('click', (e) => e.stopPropagation());
+          titleLink.href = '/detail?id=' + encodeURIComponent(it.id);
+          titleLink.addEventListener('click', goDetail);
+
           body.appendChild(titleLink);
 
           if (it.summary) {
             const summary = document.createElement('div');
             summary.className = 'summary';
             summary.textContent = it.summary;
+            summary.title = '点击查看完整总结';
+            summary.addEventListener('click', goDetail);
             body.appendChild(summary);
+            const hint = document.createElement('div');
+            hint.className = 'summary-hint';
+            hint.textContent = '点击查看全文';
+            hint.addEventListener('click', goDetail);
+            body.appendChild(hint);
           }
 
           const meta = document.createElement('div');
@@ -743,12 +828,6 @@
               toast('提醒时间已更新');
               await refreshHistory();
             });
-          });
-
-          card.addEventListener('click', (e) => {
-            if (e.target.closest('.metaBtn') || e.target.closest('a.titleLink') || e.target.closest('.card-media')) return;
-            if (!it.summary) return;
-            card.classList.toggle('expanded');
           });
 
           card.appendChild(body);
