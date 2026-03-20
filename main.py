@@ -42,6 +42,17 @@ STATIC_DIR = BASE_DIR / "static"
 ROOT_MANIFEST = BASE_DIR / "manifest.json"
 ROOT_SERVICE_WORKER = BASE_DIR / "service-worker.js"
 
+# 避免 CDN/浏览器长期缓存 HTML，导致部署后仍看到旧版主页样式与脚本
+_HTML_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+}
+
+
+def _html_response(path: Path) -> FileResponse:
+    return FileResponse(str(path), headers=_HTML_NO_CACHE_HEADERS)
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -259,10 +270,10 @@ async def _process_task(task_uuid: str) -> None:
 
 async def _send_due_tasks_loop() -> None:
     """
-    每 60 秒轮询 tasks 表，到期未通知的任务发 Web Push，然后将 is_notified=true。
+    每 30 秒轮询 tasks 表，到期未通知的任务发 Web Push，然后将 is_notified=true。
     """
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
         session = new_session()
         try:
@@ -321,7 +332,7 @@ async def _send_due_tasks_loop() -> None:
 async def index() -> FileResponse:
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
+        return _html_response(index_path)
     return JSONResponse({"ok": False, "error": "index.html not found"}, status_code=404)
 
 
@@ -329,7 +340,7 @@ async def index() -> FileResponse:
 async def page_detail() -> FileResponse:
     p = STATIC_DIR / "detail.html"
     if p.exists():
-        return FileResponse(str(p))
+        return _html_response(p)
     raise HTTPException(status_code=404, detail="detail.html not found")
 
 
@@ -337,7 +348,7 @@ async def page_detail() -> FileResponse:
 async def page_favorites() -> FileResponse:
     p = STATIC_DIR / "favorites.html"
     if p.exists():
-        return FileResponse(str(p))
+        return _html_response(p)
     raise HTTPException(status_code=404, detail="favorites.html not found")
 
 
@@ -345,7 +356,7 @@ async def page_favorites() -> FileResponse:
 async def page_profile() -> FileResponse:
     p = STATIC_DIR / "profile.html"
     if p.exists():
-        return FileResponse(str(p))
+        return _html_response(p)
     raise HTTPException(status_code=404, detail="profile.html not found")
 
 
