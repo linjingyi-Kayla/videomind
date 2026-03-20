@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#0A84FF" />
+    <meta name="theme-color" content="#f9f9f7" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
@@ -11,27 +11,45 @@
     <title>VideoMind</title>
     <style>
       :root{
-        --bg:#faf8f3;
+        --bg:#f9f9f7;
         --text:#1a1a1a;
         --muted:#5c5c5c;
         --muted2:#8a8a8a;
-        --card-cream:#f3efe6;
-        --card-cream2:#ebe4d8;
       }
 
       body{
         margin:0;
+        min-height:100vh;
         font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-        background: linear-gradient(160deg, #faf8f3 0%, #f0ebe3 45%, #e8e2d6 100%);
+        background:rgb(249, 249, 247);
         color:var(--text);
+        position:relative;
+      }
+
+      /* 顶部弥散渐变：极低饱和度，高透明度，浮在奶油基色上 */
+      body::before{
+        content:"";
+        position:fixed;
+        pointer-events:none;
+        left:0;
+        right:0;
+        top:0;
+        height:min(58vh, 520px);
+        z-index:0;
+        background:
+          radial-gradient(ellipse 130% 90% at 50% -5%, rgba(232, 210, 228, 0.09) 0%, transparent 58%),
+          radial-gradient(ellipse 90% 70% at 0% 5%, rgba(210, 228, 218, 0.07) 0%, transparent 50%),
+          radial-gradient(ellipse 90% 70% at 100% 8%, rgba(218, 210, 235, 0.08) 0%, transparent 50%),
+          linear-gradient(180deg, rgba(249, 249, 247, 0) 0%, rgb(249, 249, 247) 100%);
       }
 
       header{
         position:sticky;
         top:0;
         z-index:50;
-        background:rgba(250,248,243,0.88);
+        background:rgba(249,249,247,0.86);
         backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
         border-bottom:0;
         padding:14px 12px;
         display:flex;
@@ -49,14 +67,15 @@
       }
 
       .btn{
-        background:rgba(255,255,255,0.92);
-        color:#000000;
-        border:1px solid rgba(0,0,0,0.8);
+        background:rgba(255,255,255,0.85);
+        color:#111;
+        border:1px solid rgba(0,0,0,0.08);
         padding:10px 14px;
-        border-radius:8px;
+        border-radius:12px;
         cursor:pointer;
         font-weight:600;
         backdrop-filter: blur(10px);
+        box-shadow:0 4px 10px rgba(0,0,0,0.03), 0 -1px 0 rgba(255,255,255,0.9);
       }
       .btn:disabled{
         opacity:0.6;
@@ -64,7 +83,9 @@
       }
 
       .content{
-        padding:10px 8px 88px;
+        position:relative;
+        z-index:1;
+        padding:10px 12px 88px;
         max-width:1200px;
         margin:0 auto;
       }
@@ -132,26 +153,29 @@
 
       .columns{
         display:grid;
-        grid-template-columns:repeat(2, 1fr);
-        gap:10px;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+        gap:12px;
         align-items:start;
       }
 
       @media (min-width: 1024px){
-        .columns{ grid-template-columns:repeat(3, 1fr); }
+        .columns{ grid-template-columns:repeat(3, minmax(0, 1fr)); }
       }
 
       .card{
-        background: linear-gradient(165deg, var(--card-cream) 0%, var(--card-cream2) 100%);
+        background:rgba(255,255,255,0.95);
+        backdrop-filter:blur(1px);
+        -webkit-backdrop-filter:blur(1px);
         border:0;
-        border-radius:18px;
+        border-radius:22px;
         padding:16px 16px 14px;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+        box-shadow:0 4px 10px rgba(0,0,0,0.03), 0 -1px 0 rgba(255,255,255,1);
         position:relative;
         overflow:hidden;
         display:flex;
         flex-direction:column;
         min-height:0;
+        min-width:0;
         align-self:start;
         width:100%;
       }
@@ -167,9 +191,9 @@
 
       .card-media{
         margin:-16px -16px 12px -16px;
-        border-radius:18px 18px 0 0;
+        border-radius:22px 22px 0 0;
         overflow:hidden;
-        background:#e8e4dc;
+        background:#eceae6;
         aspect-ratio:16/9;
         position:relative;
       }
@@ -208,8 +232,8 @@
         padding:10px 12px;
         border-radius:14px;
         border:0;
-        background:rgba(255,255,255,0.45);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+        background:rgba(255,255,255,0.55);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.85);
       }
 
       .metaBtn{
@@ -313,10 +337,11 @@
         justify-content:space-around;
         align-items:center;
         padding:8px 8px calc(10px + env(safe-area-inset-bottom));
-        background:rgba(250,248,243,0.94);
+        background:rgba(249,249,247,0.94);
         backdrop-filter:blur(14px);
+        -webkit-backdrop-filter:blur(14px);
         border-top:1px solid rgba(0,0,0,0.05);
-        box-shadow:0 -4px 20px rgba(0,0,0,0.04);
+        box-shadow:0 -4px 20px rgba(0,0,0,0.03);
       }
       .bottom-nav a{
         flex:1;
@@ -334,7 +359,7 @@
       .bottom-nav svg{ width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.8; }
 
       @media (max-width: 640px){
-        .columns{ grid-template-columns:repeat(2, 1fr); }
+        .columns{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
       }
     </style>
   </head>
@@ -618,11 +643,42 @@
         return '未命名视频';
       }
 
+      function formatRemindHHMM(it) {
+        if (it.remind_at_iso) {
+          try {
+            const d = new Date(it.remind_at_iso);
+            if (!isNaN(d.getTime())) {
+              const h = String(d.getHours()).padStart(2, '0');
+              const m = String(d.getMinutes()).padStart(2, '0');
+              return h + ':' + m;
+            }
+          } catch (e) {}
+        }
+        return it.remind_at_hhmm || '未设置';
+      }
+
+      function initialTimePickerValue(it) {
+        if (it.remind_at_iso) {
+          try {
+            const d = new Date(it.remind_at_iso);
+            if (!isNaN(d.getTime())) {
+              const h = String(d.getHours()).padStart(2, '0');
+              const m = String(d.getMinutes()).padStart(2, '0');
+              return h + ':' + m;
+            }
+          } catch (e) {}
+        }
+        return it.remind_at_hhmm || '18:30';
+      }
+
       async function updateRemindAt(taskId, hhmm) {
         const resp = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
-          body: JSON.stringify({ remind_at: hhmm }),
+          body: JSON.stringify({
+            remind_at: hhmm,
+            tz_offset_minutes: new Date().getTimezoneOffset()
+          }),
           cache: 'no-store'
         });
         if (!resp.ok) {
@@ -816,13 +872,13 @@
           const meta = document.createElement('div');
           meta.className = 'meta';
           meta.classList.add('metaBtn');
-          meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at_hhmm || '未设置') + '</span>';
+          meta.innerHTML = alarmSvg + '<span>提醒时间：' + formatRemindHHMM(it) + '</span>';
           body.appendChild(meta);
 
           meta.addEventListener('click', async (e) => {
             e.stopPropagation();
             const taskId = it.id;
-            const initial = it.remind_at_hhmm || '18:30';
+            const initial = initialTimePickerValue(it);
             makeTimePickerOverlay(taskId, initial, async (hhmm) => {
               await updateRemindAt(taskId, hhmm);
               toast('提醒时间已更新');

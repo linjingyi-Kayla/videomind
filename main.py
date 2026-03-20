@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, time, timedelta, timezone
@@ -23,6 +24,8 @@ from videomind.extractor import extract_video_text
 from videomind.webpush import send_web_push
 
 load_dotenv(override=False)
+
+logger = logging.getLogger("videomind")
 
 app = FastAPI(title="VideoMind PWA Backend", version="0.2.0")
 
@@ -72,6 +75,8 @@ class HistoryItem(BaseModel):
     summary: Optional[str] = None
     key_points: Optional[List[str]] = None
     remind_at_hhmm: Optional[str] = None
+    # 存库为 UTC（naive），序列化为 ISO，供前端按用户本地时区显示
+    remind_at_iso: Optional[str] = None
     # 已到提醒时间但仍未推送（用于前端站内 Modal 兜底）
     remind_due_pending: bool = False
     is_favorite: bool = False
@@ -95,6 +100,15 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _task_remind_at_iso(t: Task) -> Optional[str]:
+    if not t.remind_at:
+        return None
+    dt = t.remind_at
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _history_item_from_task(t: Task) -> HistoryItem:
     key_points = None
     if t.key_points_json:
@@ -114,6 +128,7 @@ def _history_item_from_task(t: Task) -> HistoryItem:
         summary=t.summary,
         key_points=key_points,
         remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
+        remind_at_iso=_task_remind_at_iso(t),
         remind_due_pending=due_pending,
         is_favorite=bool(getattr(t, "is_favorite", False)),
         annotation=getattr(t, "annotation", None),
@@ -128,17 +143,31 @@ def _parse_time_hhmm(hhmm: str) -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
-def _calc_next_remind_datetime(hhmm: str) -> datetime:
+def _calc_next_remind_datetime(hhmm: str, tz_offset_minutes: Optional[int] = None) -> datetime:
     """
-    将 DeepSeek 返回的 `HH:MM` 计算为“下一次提醒时间”（UTC）。
-    若已过则顺延一天。
+    将 `HH:MM` 计算为“下一次提醒时间”的 UTC 存库值（naive UTC）。
+
+    - tz_offset_minutes：与浏览器 `Date.getTimezoneOffset()` 一致（东八区通常为 -480）。
+      传入时按用户本地墙钟解释 HH:MM。
+    - 为 None 时按 UTC 墙钟解释（兼容旧行为 / 服务端无用户时区时）。
     """
     t = _parse_time_hhmm(hhmm)
     now = _now_utc()
-    dt = datetime.combine(now.date(), t, tzinfo=timezone.utc)
-    if dt <= now:
-        dt = dt + timedelta(days=1)
-    return dt
+    now_naive = now.replace(tzinfo=None)
+
+    if tz_offset_minutes is None:
+        dt = datetime.combine(now.date(), t)
+        if dt <= now_naive:
+            dt = dt + timedelta(days=1)
+        return dt
+
+    local_wall = now_naive - timedelta(minutes=tz_offset_minutes)
+    local_date = local_wall.date()
+    candidate = datetime.combine(local_date, t)
+    if candidate <= local_wall:
+        candidate = candidate + timedelta(days=1)
+    utc_candidate = candidate + timedelta(minutes=tz_offset_minutes)
+    return utc_candidate
 
 
 def _extract_youtube_title_with_ytdlp(url: str) -> Optional[str]:
@@ -198,7 +227,14 @@ async def _process_task(task_uuid: str) -> None:
         key_points_json = json.dumps(ai.key_points, ensure_ascii=False)
         summary = ai.summary
 
-        remind_at_dt = _calc_next_remind_datetime(ai.remind_at)
+        _tz_env = os.getenv("VIDEOMIND_DEFAULT_TZ_OFFSET")
+        _tz_ai: Optional[int] = None
+        if _tz_env is not None and str(_tz_env).strip() != "":
+            try:
+                _tz_ai = int(str(_tz_env).strip())
+            except ValueError:
+                _tz_ai = None
+        remind_at_dt = _calc_next_remind_datetime(ai.remind_at, _tz_ai)
         # title 优先来自抽取结果；若缺失则用 yt-dlp 再兜底一次
         if title_future:
             extracted_title = await title_future
@@ -207,7 +243,7 @@ async def _process_task(task_uuid: str) -> None:
         task.summary = summary
         task.key_points_json = key_points_json
         task.status = "done"
-        task.remind_at = remind_at_dt.replace(tzinfo=None)
+        task.remind_at = remind_at_dt
         task.is_notified = False
         task.error_message = None
         session.commit()
@@ -246,11 +282,16 @@ async def _send_due_tasks_loop() -> None:
             if not due:
                 continue
 
+            latest_sub_id = _get_latest_subscription_id(session)
+
             for t in due:
-                if not t.subscription_id:
+                sub_id = t.subscription_id or latest_sub_id
+                if not sub_id:
+                    logger.warning("skip push: task %s has no subscription row", t.task_uuid)
                     continue
-                sub = session.get(Subscription, t.subscription_id)
+                sub = session.get(Subscription, sub_id)
                 if not sub:
+                    logger.warning("skip push: subscription %s missing for task %s", sub_id, t.task_uuid)
                     continue
 
                 subscription_obj = {
@@ -268,7 +309,8 @@ async def _send_due_tasks_loop() -> None:
                     await asyncio.to_thread(send_web_push, subscription_obj, payload)
                     t.is_notified = True
                     session.commit()
-                except Exception:
+                except Exception as e:
+                    logger.exception("web push failed for task %s: %s", t.task_uuid, e)
                     # 发送失败不标记 is_notified，避免丢通知
                     session.rollback()
         finally:
@@ -468,6 +510,8 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
 
 class UpdateRemindAtRequest(BaseModel):
     remind_at: str  # "HH:MM"
+    # 与 JS Date.getTimezoneOffset() 一致；不传则按 UTC 墙钟解释（旧行为）
+    tz_offset_minutes: Optional[int] = None
 
 
 @app.post("/api/tasks/{task_id}/remind-at", response_model=HistoryItem)
@@ -485,7 +529,7 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
             # 这里不强制，但至少确保字段存在以便前端按历史归类
             pass
 
-        task.remind_at = _calc_next_remind_datetime(req.remind_at).replace(tzinfo=None)
+        task.remind_at = _calc_next_remind_datetime(req.remind_at, req.tz_offset_minutes)
         task.is_notified = False
         task.status = task.status if task.status in {"done", "error"} else "done"
         session.commit()
