@@ -4,31 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="theme-color" content="#0A84FF" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
     <link rel="manifest" href="/manifest.json" />
-    <title>VideoRemind</title>
+    <title>VideoMind</title>
     <style>
       :root{
-        --bg:#fafafa;
-        --text:#111111;
-        --muted:#6b6b6b;
-        --muted2:#9a9a9a;
-        --border:rgba(0,0,0,0.06);
+        --bg:#faf8f3;
+        --text:#1a1a1a;
+        --muted:#5c5c5c;
+        --muted2:#8a8a8a;
+        --card-cream:#f3efe6;
+        --card-cream2:#ebe4d8;
       }
 
       body{
         margin:0;
         font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-        background: linear-gradient(135deg, #f5f5dc 0%, #e8e8d0 100%);
+        background: linear-gradient(160deg, #faf8f3 0%, #f0ebe3 45%, #e8e2d6 100%);
         color:var(--text);
       }
 
       header{
         position:sticky;
         top:0;
-        background:rgba(255,255,255,0.72);
-        backdrop-filter: blur(14px);
-        border-bottom:1px solid var(--border);
-        padding:16px;
+        z-index:50;
+        background:rgba(250,248,243,0.88);
+        backdrop-filter: blur(16px);
+        border-bottom:0;
+        padding:14px 12px;
         display:flex;
         align-items:center;
         justify-content:space-between;
@@ -37,9 +42,10 @@
 
       .brand{
         font-family:"Playfair Display","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
-        font-weight:600;
-        letter-spacing:0.12em;
-        font-size:16px;
+        font-weight:700;
+        letter-spacing:0.18em;
+        font-size:32px;
+        line-height:1.05;
       }
 
       .btn{
@@ -58,7 +64,9 @@
       }
 
       .content{
-        padding:16px;
+        padding:10px 8px 24px;
+        max-width:1200px;
+        margin:0 auto;
       }
 
       .toolbar{
@@ -71,22 +79,23 @@
 
       .search{
         flex: 1;
-        min-width: 180px;
-        background: rgba(255,255,255,0.6);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 8px 10px;
+        min-width: 200px;
+        background: rgba(255,255,255,0.55);
+        border: 0;
+        border-radius: 16px;
+        padding: 10px 14px;
         backdrop-filter: blur(14px);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
       }
 
       input[type="search"]{
         width:100%;
-        padding:10px 12px;
+        padding:4px 2px;
         border:0;
         border-radius:12px;
         background: transparent;
         color:#111;
-        font-size:14px;
+        font-size:15px;
         outline:none;
       }
 
@@ -94,47 +103,37 @@
         color:#b0b0b0;
       }
 
-      select{
-        flex: 0 0 140px;
-        padding:10px 12px;
-        border:1px solid var(--border);
-        border-radius:12px;
-        background: rgba(255,255,255,0.65);
-        color:#111;
-        font-size:14px;
-        outline:none;
-      }
-
       .tagbar{
         display:flex;
         gap:8px;
         flex-wrap:wrap;
-        margin-bottom:14px;
-        padding:0 2px;
+        margin-bottom:12px;
+        padding:0;
       }
       .tag{
-        border:1px solid var(--border);
-        background: rgba(255,255,255,0.65);
+        border:0;
+        background: rgba(255,255,255,0.5);
         border-radius:999px;
-        padding:7px 12px;
+        padding:8px 14px;
         font-size:13px;
         color:var(--muted);
         cursor:pointer;
         user-select:none;
-        transition: transform 0.08s ease, background 0.12s ease, border-color 0.12s ease;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        transition: transform 0.08s ease, background 0.12s ease, box-shadow 0.12s ease;
       }
       .tag:active{ transform: translateY(1px); }
       .tag.selected{
-        border-color: rgba(0,0,0,0.18);
-        background: rgba(255,255,255,0.9);
+        background: rgba(255,255,255,0.85);
         color:#111;
         font-weight:700;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
       }
 
       .columns{
         display:grid;
         grid-template-columns:repeat(2, 1fr);
-        gap:14px;
+        gap:10px;
       }
 
       @media (min-width: 1024px){
@@ -142,43 +141,41 @@
       }
 
       .card{
-        background:rgba(255,255,255,0.62);
-        border:1px solid rgba(0,0,0,0.04);
-        border-radius:16px;
-        padding:10px;
-        box-shadow:0 6px 18px rgba(0,0,0,0.04);
+        background: linear-gradient(165deg, var(--card-cream) 0%, var(--card-cream2) 100%);
+        border:0;
+        border-radius:18px;
+        padding:16px 16px 14px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.06);
         position:relative;
         overflow:hidden;
         display:flex;
         flex-direction:column;
-        min-height:150px;
-        backdrop-filter: blur(10px);
+        min-height:160px;
       }
 
-      .card::after{
-        content:"";
-        position:absolute;
-        inset:-2px;
-        background:
-          radial-gradient(circle at 15% 10%, rgba(245, 158, 182, 0.28), transparent 55%),
-          radial-gradient(circle at 90% 15%, rgba(157, 215, 214, 0.20), transparent 55%),
-          radial-gradient(circle at 70% 95%, rgba(200, 160, 255, 0.18), transparent 55%);
-        opacity:0.55;
-        pointer-events:none;
-      }
-
-      .card > *{
+      .card-body{
         position:relative;
         z-index:1;
+        display:flex;
+        flex-direction:column;
+        flex:1;
+        min-height:0;
+      }
+
+      .card-media{
+        margin:-16px -16px 12px -16px;
+        border-radius:18px 18px 0 0;
+        overflow:hidden;
+        background:rgba(0,0,0,0.04);
       }
 
       .cover{
         width:100%;
-        height:132px;
+        height:148px;
+        display:block;
         object-fit:cover;
-        border-radius:14px;
+        border-radius:0;
         background:rgba(0,0,0,0.03);
-        margin-bottom:8px;
       }
 
       .titleLink{
@@ -186,11 +183,12 @@
         text-decoration:none;
         font-size:15px;
         font-weight:800;
-        margin-bottom:8px;
+        margin-bottom:6px;
         display:-webkit-box;
         -webkit-line-clamp:2;
         -webkit-box-orient:vertical;
         overflow:hidden;
+        letter-spacing:-0.01em;
       }
 
       .meta{
@@ -199,11 +197,12 @@
         font-size:12.5px;
         display:flex;
         align-items:center;
-        gap:6px;
-        padding:8px 10px;
+        gap:8px;
+        padding:10px 12px;
         border-radius:14px;
-        border:1px solid rgba(0,0,0,0.05);
-        background:rgba(255,255,255,0.55);
+        border:0;
+        background:rgba(255,255,255,0.45);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
       }
 
       .metaBtn{
@@ -212,55 +211,44 @@
       }
       .metaBtn:active{ transform: translateY(1px); }
 
-      .title{
-        font-size:14px;
-        font-weight:800;
-        margin-bottom:10px;
-        display:-webkit-box;
-        -webkit-line-clamp:2;
-        -webkit-box-orient:vertical;
-        overflow:hidden;
-      }
-
       .summary{
         color:var(--muted);
         font-size:13px;
-        line-height:1.5;
+        line-height:1.45;
         white-space:pre-wrap;
         overflow:hidden;
-        max-height:62px; /* 默认 3 行左右 */
-        transition: max-height 260ms ease;
+        max-height:62px;
+        transition: max-height 280ms ease;
       }
 
-      .summary.expanded{
-        max-height:240px;
+      .card.expanded .summary{
+        max-height:260px;
       }
 
       .pill{
         display:inline-block;
-        padding:4px 10px;
+        padding:5px 11px;
         border-radius:999px;
-        font-size:12px;
-        border:1px solid rgba(0,0,0,0.05);
-        color:#444;
+        font-size:11px;
+        border:0;
+        color:#5a6b5f;
         font-weight:700;
-        background:rgba(255,255,255,0.55);
+        background:rgba(180,190,182,0.35);
         width:fit-content;
+        letter-spacing:0.04em;
+        text-transform:uppercase;
       }
       .pill.done{
-        border-color:rgba(47,156,83,0.35);
-        background:rgba(47,156,83,0.10);
-        color:#1f7a3b;
+        color:#5f7368;
+        background:rgba(168,184,176,0.42);
       }
       .pill.pending{
-        border-color:rgba(29,111,216,0.32);
-        background:rgba(29,111,216,0.08);
-        color:#1b56a4;
+        color:#5a6d8a;
+        background:rgba(168,178,196,0.38);
       }
       .pill.error{
-        border-color:rgba(217,48,37,0.35);
-        background:rgba(217,48,37,0.08);
-        color:#b42318;
+        color:#8a5a5a;
+        background:rgba(200,170,170,0.35);
       }
 
       .empty{
@@ -270,6 +258,42 @@
         font-size:14px;
       }
 
+      /* 站内提醒 Modal */
+      .vm-modal-overlay{
+        position:fixed;
+        inset:0;
+        background:rgba(40,36,32,0.45);
+        z-index:100000;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:16px;
+      }
+      .vm-modal{
+        width:100%;
+        max-width:400px;
+        background:linear-gradient(180deg,#fffdf9,#f5f0e8);
+        border-radius:20px;
+        padding:20px 18px;
+        box-shadow:0 20px 50px rgba(0,0,0,0.15);
+      }
+      .vm-modal h3{
+        margin:0 0 8px;
+        font-size:17px;
+        font-weight:800;
+      }
+      .vm-modal p{ margin:0 0 14px; color:var(--muted); font-size:14px; line-height:1.5; }
+      .vm-modal .vm-actions{ display:flex; gap:10px; justify-content:flex-end; }
+      .vm-modal button{
+        border:0;
+        border-radius:12px;
+        padding:10px 16px;
+        font-weight:700;
+        cursor:pointer;
+      }
+      .vm-modal .vm-btn-primary{ background:#2c2c2c; color:#fff; }
+      .vm-modal .vm-btn-ghost{ background:rgba(0,0,0,0.06); color:#333; }
+
       @media (max-width: 640px){
         .columns{ grid-template-columns:repeat(2, 1fr); }
       }
@@ -277,8 +301,8 @@
   </head>
   <body>
     <header>
-      <div class="brand">VideoRemind</div>
-      <button id="notifyBtn" class="btn">开启手机提醒</button>
+      <div class="brand">VideoMind</div>
+      <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
     </header>
 
     <div class="content">
@@ -286,29 +310,26 @@
         <div class="search">
           <input id="searchInput" type="search" placeholder="搜索标题/总结" />
         </div>
-        <select id="statusFilter" aria-label="状态过滤">
-          <option value="all">全部</option>
-          <option value="pending">Pending</option>
-          <option value="done">Done</option>
-          <option value="error">Error</option>
-        </select>
       </div>
       <div id="categoryTags" class="tagbar" aria-label="分类标签栏"></div>
       <div id="history" class="columns"></div>
       <div id="empty" class="empty" style="display:none;">暂无任务</div>
     </div>
+    <div id="vmModalRoot" aria-live="polite"></div>
 
     <script>
       const notifyBtn = document.getElementById('notifyBtn');
       const historyEl = document.getElementById('history');
       const emptyEl = document.getElementById('empty');
       const searchInput = document.getElementById('searchInput');
-      const statusFilter = document.getElementById('statusFilter');
       const categoryTagsEl = document.getElementById('categoryTags');
+      const modalRoot = document.getElementById('vmModalRoot');
 
       let selectedCategory = 'all';
 
       let lastItems = [];
+
+      const fetchOpts = { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } };
 
       function getSubscriptionId() {
         return localStorage.getItem('subscription_id');
@@ -328,26 +349,48 @@
       }
 
       async function fetchVapidPublicKey() {
-        const resp = await fetch('/api/vapid-public-key');
+        const resp = await fetch('/api/vapid-public-key', fetchOpts);
         const data = await resp.json();
         return data.publicKey;
       }
 
+      function toast(msg) {
+        const t = document.createElement('div');
+        t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:100001;background:rgba(30,30,30,0.92);color:#fff;padding:12px 18px;border-radius:14px;font-size:14px;max-width:90%;box-shadow:0 8px 24px rgba(0,0,0,0.2)';
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3200);
+      }
+
       async function subscribePush() {
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-          alert('当前浏览器不支持 Web Push');
+        toast('正在请求通知权限…');
+        if (!('serviceWorker' in navigator)) {
+          toast('当前浏览器不支持 Service Worker');
+          return;
+        }
+        try {
+          await navigator.serviceWorker.register('/service-worker.js');
+        } catch (e) {
+          console.error(e);
+          toast('Service Worker 注册失败');
+        }
+
+        if (!('PushManager' in window)) {
+          toast('当前浏览器不支持 Web Push（可继续使用站内提醒弹窗）');
           return;
         }
 
-        const permission = await Notification.requestPermission();
+        let permission = Notification.permission;
+        if (permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
         if (permission !== 'granted') {
-          alert('通知权限未开启');
+          toast('通知权限未开启，已改为站内提醒');
           return;
         }
 
         const reg = await navigator.serviceWorker.ready;
         const publicKey = await fetchVapidPublicKey();
-
         const applicationServerKey = base64ToUint8Array(publicKey);
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
@@ -356,8 +399,9 @@
 
         const resp = await fetch('/api/subscribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(sub)
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+          body: JSON.stringify(sub),
+          cache: 'no-store'
         });
         if (!resp.ok) {
           const text = await resp.text();
@@ -365,6 +409,7 @@
         }
         const data = await resp.json();
         setSubscriptionId(data.subscription_id);
+        toast('提醒已开启，订阅已保存');
         await refreshHistory();
       }
 
@@ -506,14 +551,71 @@
       async function updateRemindAt(taskId, hhmm) {
         const resp = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ remind_at: hhmm })
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+          body: JSON.stringify({ remind_at: hhmm }),
+          cache: 'no-store'
         });
         if (!resp.ok) {
           const text = await resp.text();
           throw new Error(text || '更新提醒失败');
         }
         return await resp.json();
+      }
+
+      function showOverdueModalIfNeeded(items) {
+        const due = (items || []).filter((x) => x.remind_due_pending);
+        if (!due.length) return;
+        if (sessionStorage.getItem('vm_overdue_modal_once') === '1') return;
+        sessionStorage.setItem('vm_overdue_modal_once', '1');
+
+        const overlay = document.createElement('div');
+        overlay.className = 'vm-modal-overlay';
+        const box = document.createElement('div');
+        box.className = 'vm-modal';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        const h = document.createElement('h3');
+        h.textContent = '提醒时间已到';
+        const p = document.createElement('p');
+        p.appendChild(document.createTextNode('以下视频已到提醒时间（Web Push 未送达时，用站内提醒兜底）：'));
+        p.appendChild(document.createElement('br'));
+        p.appendChild(document.createElement('br'));
+        due.slice(0, 3).forEach((d) => {
+          const line = document.createElement('div');
+          line.textContent = '• ' + (d.title || '未命名视频');
+          p.appendChild(line);
+        });
+        if (due.length > 3) {
+          const more = document.createElement('div');
+          more.textContent = '…还有 ' + (due.length - 3) + ' 条';
+          p.appendChild(more);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'vm-actions';
+        const b1 = document.createElement('button');
+        b1.type = 'button';
+        b1.className = 'vm-btn-ghost';
+        b1.textContent = '知道了';
+        const b2 = document.createElement('button');
+        b2.type = 'button';
+        b2.className = 'vm-btn-primary';
+        b2.textContent = '查看列表';
+        b1.addEventListener('click', () => overlay.remove());
+        b2.addEventListener('click', () => {
+          overlay.remove();
+          const el = document.getElementById('history');
+          if (el) window.scrollTo({ top: el.offsetTop - 80, behavior: 'smooth' });
+        });
+        actions.appendChild(b1);
+        actions.appendChild(b2);
+        box.appendChild(h);
+        box.appendChild(p);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) overlay.remove();
+        });
+        modalRoot.appendChild(overlay);
       }
 
       async function refreshHistory() {
@@ -523,7 +625,7 @@
         const historyUrl = subscriptionId
           ? '/api/history?subscription_id=' + encodeURIComponent(subscriptionId)
           : '/api/history';
-        const resp = await fetch(historyUrl);
+        const resp = await fetch(historyUrl, fetchOpts);
         if (!resp.ok) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';
@@ -532,6 +634,15 @@
         const data = await resp.json();
         const items = data.items || [];
         lastItems = items;
+
+        try {
+          const sig = JSON.stringify(items.map((x) => [x.id, x.status, x.summary && x.summary.slice(0, 40)]));
+          if (sig !== window.__vm_last_sig) {
+            window.__vm_last_sig = sig;
+          }
+        } catch (e) {}
+
+        showOverdueModalIfNeeded(items);
 
         // 动态生成分类标签栏
         const categories = Array.from(new Set((items || []).map((x) => x.category || '未分类'))).sort();
@@ -552,7 +663,11 @@
         for (const c of categories) categoryTagsEl.appendChild(mkTag(c, c));
 
         const filtered = applyFilters(items);
+        renderCardList(filtered);
+        return filtered;
+      }
 
+      function renderCardList(filtered) {
         historyEl.innerHTML = '';
         emptyEl.style.display = filtered.length ? 'none' : '';
 
@@ -571,12 +686,18 @@
           card.className = 'card';
           card.dataset.taskId = it.id;
 
-          const title = document.createElement('div');
           const titleText = displayTitleForTask(it);
           const videoUrl = it.video_url || '';
 
+          card.appendChild(renderStatusPill(it.status));
+
+          const body = document.createElement('div');
+          body.className = 'card-body';
+
           const coverUrl = coverForVideoUrl(videoUrl);
           if (coverUrl) {
+            const media = document.createElement('div');
+            media.className = 'card-media';
             const img = document.createElement('img');
             img.className = 'cover';
             img.loading = 'lazy';
@@ -587,7 +708,8 @@
               e.stopPropagation();
               window.location.href = videoUrl;
             });
-            card.appendChild(img);
+            media.appendChild(img);
+            body.appendChild(media);
           }
 
           const titleLink = document.createElement('a');
@@ -595,55 +717,50 @@
           titleLink.textContent = titleText;
           titleLink.href = videoUrl;
           titleLink.target = '_blank';
+          titleLink.rel = 'noopener noreferrer';
           titleLink.addEventListener('click', (e) => e.stopPropagation());
-          card.appendChild(titleLink);
-
-          card.appendChild(renderStatusPill(it.status));
+          body.appendChild(titleLink);
 
           if (it.summary) {
             const summary = document.createElement('div');
             summary.className = 'summary';
             summary.textContent = it.summary;
-            card.appendChild(summary);
-
-            // 点击卡片展开/收起总结（除非点到标题/封面/时间）
-            card.addEventListener('click', () => {
-              const expanded = summary.classList.toggle('expanded');
-              // 可选：记录展开状态到 dataset
-              card.dataset.expanded = expanded ? '1' : '0';
-            });
+            body.appendChild(summary);
           }
 
           const meta = document.createElement('div');
           meta.className = 'meta';
           meta.classList.add('metaBtn');
           meta.innerHTML = alarmSvg + '<span>提醒时间：' + (it.remind_at_hhmm || '未设置') + '</span>';
-          card.appendChild(meta);
+          body.appendChild(meta);
 
-          // 时间选择器：用遮罩底部弹出，iOS 上交互更稳定
           meta.addEventListener('click', async (e) => {
             e.stopPropagation();
             const taskId = it.id;
             const initial = it.remind_at_hhmm || '18:30';
             makeTimePickerOverlay(taskId, initial, async (hhmm) => {
               await updateRemindAt(taskId, hhmm);
+              toast('提醒时间已更新');
               await refreshHistory();
             });
           });
 
+          card.addEventListener('click', (e) => {
+            if (e.target.closest('.metaBtn') || e.target.closest('a.titleLink') || e.target.closest('.card-media')) return;
+            if (!it.summary) return;
+            card.classList.toggle('expanded');
+          });
+
+          card.appendChild(body);
           historyEl.appendChild(card);
         }
-
-        return filtered;
       }
 
       function applyFilters(items) {
         const q = (searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '');
-        const st = statusFilter ? statusFilter.value : 'all';
         const cat = selectedCategory || 'all';
 
         return (items || []).filter((it) => {
-          if (st !== 'all' && (it.status || '').toLowerCase() !== st) return false;
           if (cat !== 'all') {
             const itemCat = it.category || '未分类';
             if (itemCat !== cat) return false;
@@ -656,17 +773,17 @@
         });
       }
 
-      // 用户手动筛选时立即刷新渲染（不重新请求）
+      // 搜索：仅本地筛选 lastItems 并重绘，避免频繁打 API
       let rerenderTimer = null;
       function scheduleRerender() {
         if (rerenderTimer) clearTimeout(rerenderTimer);
         rerenderTimer = setTimeout(() => {
-          refreshHistory().catch(() => {});
-        }, 300);
+          const filtered = applyFilters(lastItems);
+          renderCardList(filtered);
+        }, 200);
       }
 
       if (searchInput) searchInput.addEventListener('input', () => scheduleRerender());
-      if (statusFilter) statusFilter.addEventListener('change', () => refreshHistory().catch(() => {}));
       // 分类标签点击后会直接触发 refreshHistory()
 
       notifyBtn.addEventListener('click', async () => {
@@ -680,26 +797,17 @@
         }
       });
 
-      // service-worker 可能需要显式注册；如果已注册不会重复生效
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/service-worker.js').catch(console.error);
       }
 
-      // 自动轮询，避免用户等待/刷新丢失进度
+      // 每 30 秒轮询一次，避免缓存导致“分享后不出现 / Pending 不更新”
       refreshHistory()
         .then(() => {
-          window.__vm_poll = setInterval(async () => {
-            try {
-              const items = await refreshHistory();
-              const hasPending = (items || []).some((x) => x.status === 'pending');
-              if (!hasPending && window.__vm_poll) {
-                clearInterval(window.__vm_poll);
-                window.__vm_poll = null;
-              }
-            } catch (e) {
-              // 静默：不影响页面使用
-            }
-          }, 6000);
+          if (window.__vm_poll) clearInterval(window.__vm_poll);
+          window.__vm_poll = setInterval(() => {
+            refreshHistory().catch(() => {});
+          }, 30000);
         })
         .catch(console.error);
     </script>

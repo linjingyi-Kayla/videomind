@@ -72,6 +72,8 @@ class HistoryItem(BaseModel):
     summary: Optional[str] = None
     key_points: Optional[List[str]] = None
     remind_at_hhmm: Optional[str] = None
+    # 已到提醒时间但仍未推送（用于前端站内 Modal 兜底）
+    remind_due_pending: bool = False
     is_notified: bool
     status: str
     created_at: datetime
@@ -397,6 +399,7 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
             q3 = select(Task).order_by(desc(Task.created_at)).limit(50)
             items = session.execute(q3).scalars().all()
 
+        now_naive = _now_utc().replace(tzinfo=None)
         out: List[HistoryItem] = []
         for t in items:
             key_points = None
@@ -406,15 +409,23 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
                 except Exception:
                     key_points = None
 
+            due_pending = bool(
+                t.remind_at
+                and t.status == "done"
+                and not t.is_notified
+                and t.remind_at <= now_naive
+            )
+
             out.append(
                 HistoryItem(
                     id=t.task_uuid,
                     video_url=t.video_url,
                     title=t.title,
-                category=t.category,
+                    category=t.category,
                     summary=t.summary,
                     key_points=key_points,
                     remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
+                    remind_due_pending=due_pending,
                     is_notified=bool(t.is_notified),
                     status=t.status,
                     created_at=t.created_at,
@@ -456,6 +467,13 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
             except Exception:
                 key_points = None
 
+        now_naive = _now_utc().replace(tzinfo=None)
+        due_pending = bool(
+            task.remind_at
+            and task.status == "done"
+            and not task.is_notified
+            and task.remind_at <= now_naive
+        )
         return HistoryItem(
             id=task.task_uuid,
             video_url=task.video_url,
@@ -464,6 +482,7 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
             summary=task.summary,
             key_points=key_points,
             remind_at_hhmm=task.remind_at.strftime("%H:%M") if task.remind_at else None,
+            remind_due_pending=due_pending,
             is_notified=bool(task.is_notified),
             status=task.status,
             created_at=task.created_at,

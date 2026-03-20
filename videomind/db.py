@@ -42,94 +42,107 @@ engine, SessionLocal = create_engine_and_session()
 
 
 def init_db() -> None:
-    # SQLite 升级兼容：旧版 tasks 表没有 task_uuid（且 id 为 TEXT 主键）
-    # 迁移策略：tasks -> tasks_old -> 重建 tasks（把旧 id 复制到 task_uuid）
+    """
+    初始化表结构：始终 create_all（只创建缺失的表/列，不覆盖已有数据）。
+
+    旧版 tasks（无 task_uuid）的“重命名+复制+DROP”迁移具有误删风险。
+    仅当设置环境变量 VIDEOMIND_ALLOW_LEGACY_TASKS_MIGRATION=1 时才执行。
+    """
     try:
+        # 先确保 ORM 声明的表存在（只创建缺失对象，不覆盖已有数据）
+        Base.metadata.create_all(bind=engine)
+
         insp = inspect(engine)
-        if "tasks" in insp.get_table_names():
-            cols = [c["name"] for c in insp.get_columns("tasks")]
-            if "task_uuid" not in cols and engine.dialect.name == "sqlite":
-                with engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
-                Base.metadata.create_all(bind=engine)
-                with engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO tasks (
-                              task_uuid, video_url, title, category, summary, key_points_json,
-                              remind_at, is_notified, status, error_message, subscription_id,
-                              created_at, updated_at
-                            )
-                            SELECT
-                              id as task_uuid, video_url, title, category, summary, key_points_json,
-                              remind_at, is_notified, status, error_message, subscription_id,
-                              created_at, updated_at
-                            FROM tasks_old
-                            """
-                        )
-                    )
-                    conn.execute(text("DROP TABLE tasks_old"))
-            elif "task_uuid" not in cols and engine.dialect.name.startswith("postgres"):
-                # Postgres 升级兼容：如果旧 tasks 没有 task_uuid，则用旧 id 填充 task_uuid
-                old_cols = set(cols)
+        tables = insp.get_table_names()
+        if "tasks" not in tables:
+            return
 
-                def _expr(col: str, fallback: str = "NULL") -> str:
-                    return col if col in old_cols else fallback
+        cols = [c["name"] for c in insp.get_columns("tasks")]
+        if "task_uuid" in cols:
+            # 已是新结构：不再做任何破坏性迁移
+            return
 
-                video_url_expr = _expr("video_url")
-                title_expr = _expr("title")
-                category_expr = _expr("category")
-                summary_expr = _expr("summary")
-                key_points_expr = _expr("key_points_json")
-                remind_at_expr = _expr("remind_at")
-                is_notified_expr = _expr("is_notified")
-                status_expr = _expr("status")
-                error_message_expr = _expr("error_message")
-                subscription_id_expr = _expr("subscription_id")
-                created_at_expr = _expr("created_at")
-                updated_at_expr = _expr("updated_at")
+        if os.getenv("VIDEOMIND_ALLOW_LEGACY_TASKS_MIGRATION", "").strip() != "1":
+            # 检测到旧表结构但未授权迁移：避免误删数据，由运维显式开启后再迁移
+            return
 
-                with engine.begin() as conn:
-                    conn.execute(text("DROP TABLE IF EXISTS tasks_old"))
-                    conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
-
-                Base.metadata.create_all(bind=engine)
-
-                with engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            f"""
-                            INSERT INTO tasks (
-                              task_uuid, video_url, title, category, summary, key_points_json,
-                              remind_at, is_notified, status, error_message, subscription_id,
-                              created_at, updated_at
-                            )
-                            SELECT
-                              id::text as task_uuid,
-                              {video_url_expr},
-                              {title_expr},
-                              {category_expr},
-                              {summary_expr},
-                              {key_points_expr},
-                              {remind_at_expr},
-                              {is_notified_expr},
-                              {status_expr},
-                              {error_message_expr},
-                              {subscription_id_expr},
-                              {created_at_expr},
-                              {updated_at_expr}
-                            FROM tasks_old
-                            """
-                        )
-                    )
-                    conn.execute(text("DROP TABLE tasks_old"))
-            else:
-                Base.metadata.create_all(bind=engine)
-        else:
+        # —— 以下为可选的旧表迁移（需显式开启）——
+        if engine.dialect.name == "sqlite":
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
             Base.metadata.create_all(bind=engine)
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO tasks (
+                          task_uuid, video_url, title, category, summary, key_points_json,
+                          remind_at, is_notified, status, error_message, subscription_id,
+                          created_at, updated_at
+                        )
+                        SELECT
+                          id as task_uuid, video_url, title, category, summary, key_points_json,
+                          remind_at, is_notified, status, error_message, subscription_id,
+                          created_at, updated_at
+                        FROM tasks_old
+                        """
+                    )
+                )
+                conn.execute(text("DROP TABLE tasks_old"))
+        elif engine.dialect.name.startswith("postgres"):
+            old_cols = set(cols)
+
+            def _expr(col: str, fallback: str = "NULL") -> str:
+                return col if col in old_cols else fallback
+
+            video_url_expr = _expr("video_url")
+            title_expr = _expr("title")
+            category_expr = _expr("category")
+            summary_expr = _expr("summary")
+            key_points_expr = _expr("key_points_json")
+            remind_at_expr = _expr("remind_at")
+            is_notified_expr = _expr("is_notified")
+            status_expr = _expr("status")
+            error_message_expr = _expr("error_message")
+            subscription_id_expr = _expr("subscription_id")
+            created_at_expr = _expr("created_at")
+            updated_at_expr = _expr("updated_at")
+
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE IF EXISTS tasks_old"))
+                conn.execute(text("ALTER TABLE tasks RENAME TO tasks_old"))
+
+            Base.metadata.create_all(bind=engine)
+
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO tasks (
+                          task_uuid, video_url, title, category, summary, key_points_json,
+                          remind_at, is_notified, status, error_message, subscription_id,
+                          created_at, updated_at
+                        )
+                        SELECT
+                          id::text as task_uuid,
+                          {video_url_expr},
+                          {title_expr},
+                          {category_expr},
+                          {summary_expr},
+                          {key_points_expr},
+                          {remind_at_expr},
+                          {is_notified_expr},
+                          {status_expr},
+                          {error_message_expr},
+                          {subscription_id_expr},
+                          {created_at_expr},
+                          {updated_at_expr}
+                        FROM tasks_old
+                        """
+                    )
+                )
+                conn.execute(text("DROP TABLE tasks_old"))
     except Exception:
-        # 无需阻断启动；数据库权限不足时让应用按只读模型启动
         Base.metadata.create_all(bind=engine)
 
 

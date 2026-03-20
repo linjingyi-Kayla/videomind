@@ -1,6 +1,6 @@
 {
-  "name": "VideoRemind",
-  "short_name": "VideoRemind",
+  "name": "VideoMind",
+  "short_name": "VideoMind",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fafafa",
