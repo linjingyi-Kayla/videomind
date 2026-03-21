@@ -100,6 +100,7 @@ class HistoryItem(BaseModel):
     title: Optional[str] = None
     category: Optional[str] = None
     summary: Optional[str] = None
+    error_message: Optional[str] = None
     key_points: Optional[List[str]] = None
     remind_at_hhmm: Optional[str] = None
     # 存库为 UTC（naive），序列化为 ISO，供前端按用户本地时区显示
@@ -153,6 +154,7 @@ def _history_item_from_task(t: Task) -> HistoryItem:
         title=t.title,
         category=t.category,
         summary=t.summary,
+        error_message=getattr(t, "error_message", None),
         key_points=key_points,
         remind_at_hhmm=t.remind_at.strftime("%H:%M") if t.remind_at else None,
         remind_at_iso=_task_remind_at_iso(t),
@@ -525,6 +527,10 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
 async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
     """
     返回已总结/处理中任务列表（供 PWA 看板展示）
+
+    单用户 PWA：必须始终返回「最近任务」，不能只按 subscription_id 过滤。
+    否则会出现：本地已有订阅 A 时，新导入任务若 subscription_id 为 None 或与 A 不一致，
+    列表里永远看不到新任务，直到「清空/重开」等偶然触发全量查询。
     """
     session = new_session()
     try:
@@ -532,17 +538,9 @@ async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
         if not target_sid:
             target_sid = _get_latest_subscription_id(session)
 
-        # 先按 subscription_id 查；如果为空，做兜底避免“订阅变更/本地缓存旧导致看不到任务”
-        q1 = select(Task).where(Task.subscription_id == target_sid).order_by(desc(Task.created_at)).limit(50)
-        items = session.execute(q1).scalars().all()
-
-        if target_sid and not items:
-            q2 = select(Task).where(Task.subscription_id.is_(None)).order_by(desc(Task.created_at)).limit(50)
-            items = session.execute(q2).scalars().all()
-
-        if not items:
-            q3 = select(Task).order_by(desc(Task.created_at)).limit(50)
-            items = session.execute(q3).scalars().all()
+        items = (
+            session.execute(select(Task).order_by(desc(Task.created_at)).limit(50)).scalars().all()
+        )
 
         out: List[HistoryItem] = []
         for t in items:

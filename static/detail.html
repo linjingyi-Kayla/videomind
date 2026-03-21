@@ -257,46 +257,46 @@
       const errEl = document.getElementById('err');
       const content = document.getElementById('content');
 
-      async function load() {
-        if (!id) {
-          errEl.style.display = '';
-          errEl.textContent = '缺少任务 id';
-          return;
-        }
-        const resp = await fetch(
-          '/api/tasks/' + encodeURIComponent(id) + '?_=' + Date.now(),
-          fetchOpts
-        );
-        if (!resp.ok) {
-          errEl.style.display = '';
-          errEl.textContent = '加载失败：' + (await resp.text());
-          return;
-        }
-        const it = await resp.json();
-        errEl.style.display = 'none';
-        content.style.display = '';
+      /** 当前任务（轮询时同步更新，供收藏按钮等使用） */
+      let taskState = null;
 
+      function renderTask(it) {
         const vid = extractYouTubeId(it.video_url || '');
         const img = document.getElementById('cover');
         if (vid) {
-          img.src = 'https://img.youtube.com/vi/' + vid + '/maxresdefault.jpg';
-          img.addEventListener(
-            'error',
-            function once() {
-              img.removeEventListener('error', once);
-              img.src = 'https://img.youtube.com/vi/' + vid + '/hqdefault.jpg';
-            },
-            { once: true }
-          );
+          if (img.dataset.vmVid !== vid) {
+            img.dataset.vmVid = vid;
+            img.src = 'https://img.youtube.com/vi/' + vid + '/maxresdefault.jpg';
+            img.addEventListener(
+              'error',
+              function once() {
+                img.removeEventListener('error', once);
+                img.src = 'https://img.youtube.com/vi/' + vid + '/hqdefault.jpg';
+              },
+              { once: true }
+            );
+          }
         }
-        img.alt = it.title || '视频';
+        img.alt = it.title || (it.status === 'pending' ? '加载中' : '视频');
 
         document.getElementById('cat').textContent = it.category || '未分类';
         const tl = document.getElementById('titleLink');
-        tl.textContent = it.title || '未命名视频';
+        tl.textContent =
+          it.title || (it.status === 'pending' ? '正在生成标题与总结…' : '未命名视频');
         tl.href = it.video_url || '#';
 
-        document.getElementById('summary').textContent = it.summary || '（暂无总结）';
+        let sumText = '（暂无总结）';
+        if (it.status === 'pending') {
+          sumText = it.summary || '正在生成总结，请稍候…';
+        } else if (it.status === 'error') {
+          sumText = it.error_message || '（处理失败）';
+        } else {
+          sumText = it.summary || '（暂无总结）';
+        }
+        const sumEl = document.getElementById('summary');
+        sumEl.textContent = sumText;
+        sumEl.style.color = it.status === 'error' ? '#b42318' : '';
+
         const kp = document.getElementById('kp');
         kp.innerHTML = '';
         (it.key_points || []).forEach((k) => {
@@ -310,12 +310,17 @@
 
         const heart = document.getElementById('btnHeart');
         function syncHeart() {
-          heart.classList.toggle('on', !!it.is_favorite);
-          heart.textContent = it.is_favorite ? '♥ 已收藏' : '♡ 收藏';
+          heart.classList.toggle('on', !!taskState.is_favorite);
+          heart.textContent = taskState.is_favorite ? '♥ 已收藏' : '♡ 收藏';
         }
         syncHeart();
+      }
+
+      function wireActionsOnce() {
+        const heart = document.getElementById('btnHeart');
         heart.onclick = async () => {
-          const next = !it.is_favorite;
+          if (!taskState) return;
+          const next = !taskState.is_favorite;
           const r = await fetch('/api/tasks/' + encodeURIComponent(id), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
@@ -324,8 +329,9 @@
           });
           if (r.ok) {
             const j = await r.json();
-            it.is_favorite = j.is_favorite;
-            syncHeart();
+            taskState.is_favorite = j.is_favorite;
+            heart.classList.toggle('on', !!taskState.is_favorite);
+            heart.textContent = taskState.is_favorite ? '♥ 已收藏' : '♡ 收藏';
           }
         };
 
@@ -343,6 +349,56 @@
             alert('保存失败');
           }
         };
+      }
+
+      wireActionsOnce();
+
+      async function fetchAndRender(silent) {
+        const resp = await fetch(
+          '/api/tasks/' + encodeURIComponent(id) + '?_=' + Date.now(),
+          fetchOpts
+        );
+        if (!resp.ok) {
+          if (!silent) {
+            errEl.style.display = '';
+            errEl.textContent = '加载失败：' + (await resp.text());
+          }
+          return null;
+        }
+        const it = await resp.json();
+        taskState = it;
+        errEl.style.display = 'none';
+        content.style.display = '';
+        renderTask(it);
+        return it;
+      }
+
+      async function load() {
+        if (!id) {
+          errEl.style.display = '';
+          errEl.textContent = '缺少任务 id';
+          return;
+        }
+        if (window.__detailPoll) {
+          clearInterval(window.__detailPoll);
+          window.__detailPoll = null;
+        }
+        const it = await fetchAndRender(false);
+        if (!it) return;
+
+        if (it.status === 'pending') {
+          window.__detailPoll = setInterval(async () => {
+            try {
+              const next = await fetchAndRender(true);
+              if (!next || next.status !== 'pending') {
+                clearInterval(window.__detailPoll);
+                window.__detailPoll = null;
+              }
+            } catch (e) {
+              console.warn(e);
+            }
+          }, 5000);
+        }
       }
 
       load().catch((e) => {

@@ -662,8 +662,8 @@
       }
 
       function displayTitleForTask(it) {
-        // 标题缺失时不再展示视频 ID，统一提示“未命名视频”
         if (it.title) return it.title;
+        if (it.status === 'pending') return '正在生成标题与总结…';
         return '未命名视频';
       }
 
@@ -772,9 +772,10 @@
         const subscriptionId = getSubscriptionId();
 
         // 即使本地没有 subscription_id，也让后端根据“最新订阅”兜底返回历史任务
-        const historyUrl = subscriptionId
-          ? '/api/history?subscription_id=' + encodeURIComponent(subscriptionId)
-          : '/api/history';
+        const historyUrl =
+          (subscriptionId
+            ? '/api/history?subscription_id=' + encodeURIComponent(subscriptionId) + '&'
+            : '/api/history?') + '_=' + Date.now();
         const resp = await fetch(historyUrl, fetchOpts);
         if (!resp.ok) {
           historyEl.innerHTML = '';
@@ -879,7 +880,21 @@
 
           body.appendChild(titleLink);
 
-          if (it.summary) {
+          if (it.status === 'pending' && !it.summary) {
+            const summary = document.createElement('div');
+            summary.className = 'summary';
+            summary.style.color = '#888';
+            summary.style.fontStyle = 'italic';
+            summary.textContent = '正在生成总结，请稍候…';
+            body.appendChild(summary);
+          } else if (it.status === 'error' && !it.summary) {
+            const summary = document.createElement('div');
+            summary.className = 'summary';
+            summary.style.color = '#b42318';
+            summary.textContent = '处理失败，请点入详情查看原因或重试导入';
+            summary.addEventListener('click', goDetail);
+            body.appendChild(summary);
+          } else if (it.summary) {
             const summary = document.createElement('div');
             summary.className = 'summary';
             summary.textContent = it.summary;
@@ -960,13 +975,13 @@
         navigator.serviceWorker.register('/service-worker.js').catch(console.error);
       }
 
-      // 每 30 秒轮询一次，避免缓存导致“分享后不出现 / Pending 不更新”
+      // 每 8 秒轮询一次，避免缓存导致「分享后不出现 / Pending 不更新」
       refreshHistory()
         .then(() => {
           if (window.__vm_poll) clearInterval(window.__vm_poll);
           window.__vm_poll = setInterval(() => {
             refreshHistory().catch(() => {});
-          }, 60000);
+          }, 8000);
         })
         .catch(console.error);
     </script>
