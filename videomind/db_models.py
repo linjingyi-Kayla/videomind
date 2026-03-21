@@ -18,6 +18,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    # 供快捷指令 / Web Share 等无法带 JWT 的场景：与 url 一并提交
+    share_token: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True, index=True)
 
 
 class Subscription(Base):

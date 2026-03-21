@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -144,6 +145,7 @@ class TokenResponse(BaseModel):
 class MeResponse(BaseModel):
     id: int
     email: str
+    share_token: str
 
 
 def get_db():
@@ -521,7 +523,7 @@ async def manifest_json() -> FileResponse:
                 "action": "/api/share-target",
                 "method": "POST",
                 "enctype": "multipart/form-data",
-                "params": {"url": "url"},
+                "params": {"url": "url", "share_token": "text"},
             },
         }
     )
@@ -557,7 +559,11 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> JSONRespon
     exists = db.execute(select(User).where(User.email == email)).scalars().first()
     if exists:
         raise HTTPException(status_code=400, detail="该邮箱已注册")
-    u = User(email=email, hashed_password=hash_password(body.password))
+    u = User(
+        email=email,
+        hashed_password=hash_password(body.password),
+        share_token=secrets.token_hex(16),
+    )
     db.add(u)
     db.commit()
     return JSONResponse({"ok": True, "message": "注册成功"})
@@ -573,8 +579,15 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
 
 
 @app.get("/api/me", response_model=MeResponse)
-def me(current_user: User = Depends(get_current_user)) -> MeResponse:
-    return MeResponse(id=current_user.id, email=current_user.email)
+def me(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> MeResponse:
+    u = db.get(User, current_user.id)
+    if u is None:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    if not u.share_token:
+        u.share_token = secrets.token_hex(16)
+        db.commit()
+        db.refresh(u)
+    return MeResponse(id=u.id, email=u.email, share_token=u.share_token or "")
 
 
 @app.post("/api/subscribe", response_model=SubscribeResponse)
@@ -795,37 +808,54 @@ async def patch_task(
 @app.post("/api/share-target")
 async def share_target(request: Request, background: BackgroundTasks) -> JSONResponse:
     """
-    Web Share Target 入口：接收来自 iOS 的分享 URL，然后创建任务并在后台处理。
-    需在 Header 带 Authorization: Bearer，或在 JSON/form 中传 access_token（与登录返回一致）。
+    Web Share Target / 快捷指令：接收分享的 YouTube URL。
+
+    鉴权（任选其一）：
+    - Header: Authorization: Bearer <JWT>
+    - 查询参数或表单: access_token=<JWT>
+    - 查询参数或表单: share_token=<我的页展示的分享密钥>（快捷指令无法带 JWT 时用此方式）
     """
+    qp = request.query_params
     content_type = request.headers.get("content-type", "")
     url: Optional[str] = None
-    token: Optional[str] = None
+    jwt_token: Optional[str] = None
+    share_key: Optional[str] = None
+
     auth_h = request.headers.get("authorization")
     if auth_h and auth_h.lower().startswith("bearer "):
-        token = auth_h.split(" ", 1)[1].strip()
+        jwt_token = auth_h.split(" ", 1)[1].strip()
+    jwt_token = jwt_token or qp.get("access_token")
+    share_key = qp.get("share_token")
+
     try:
         if "application/json" in content_type:
             body = await request.json()
             url = body.get("url")
-            token = token or body.get("access_token")
+            jwt_token = jwt_token or body.get("access_token")
+            share_key = share_key or body.get("share_token")
         else:
             form = await request.form()
             url = form.get("url")
-            token = token or form.get("access_token")
+            jwt_token = jwt_token or form.get("access_token")
+            share_key = share_key or form.get("share_token")
     except Exception:
         url = None
 
     if not url:
         raise HTTPException(status_code=400, detail="缺少 url 参数")
-    if not token:
-        raise HTTPException(status_code=401, detail="需要登录：请在 Header 携带 Authorization: Bearer，或传入 access_token")
 
     session = new_session()
     try:
-        user = get_user_by_token(session, token)
+        user: Optional[User] = None
+        if jwt_token:
+            user = get_user_by_token(session, jwt_token)
+        if not user and share_key:
+            user = session.execute(select(User).where(User.share_token == share_key)).scalars().first()
         if not user:
-            raise HTTPException(status_code=401, detail="Token 无效或已过期")
+            raise HTTPException(
+                status_code=401,
+                detail="需要鉴权：请使用「我的」中的分享密钥 share_token，或传入 access_token / Authorization",
+            )
     finally:
         session.close()
 

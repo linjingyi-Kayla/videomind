@@ -90,6 +90,55 @@
         transform: translateY(1px);
       }
 
+      .share-box {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.65);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        text-align: left;
+      }
+      .share-label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #555;
+        margin-bottom: 8px;
+      }
+      .share-token {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        word-break: break-all;
+        color: #222;
+        padding: 8px 10px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #e5e5e5;
+        margin-bottom: 8px;
+      }
+      .btn-copy {
+        width: 100%;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #c5cbd4;
+        background: #fff;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+        margin-bottom: 8px;
+      }
+      .share-hint {
+        font-size: 11px;
+        color: #666;
+        line-height: 1.45;
+        margin: 0;
+      }
+      .share-hint code {
+        font-size: 10px;
+        background: #eee;
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+
       .list {
         max-width: 520px;
         margin: 16px auto;
@@ -170,6 +219,15 @@
         </svg>
       </div>
       <div id="userEmail" class="user-email"></div>
+      <div id="shareBox" class="share-box" style="display: none">
+        <div class="share-label">快捷指令 / 系统分享</div>
+        <div id="shareTokenText" class="share-token"></div>
+        <button type="button" class="btn-copy" id="copyShareToken">复制分享密钥</button>
+        <p class="share-hint">
+          登录后无法携带 JWT，请在本机快捷指令的「请求」里增加表单字段
+          <code>share_token</code>，值为上方密钥（与 <code>url</code> 一起 POST）。勿将密钥发给他人。
+        </p>
+      </div>
       <button type="button" class="btn-logout" id="logoutBtn">退出登录</button>
     </div>
 
@@ -210,12 +268,23 @@
         var guestList = document.getElementById('guestList');
         var emailEl = document.getElementById('userEmail');
         var headerSub = document.getElementById('headerSub');
+        var shareBox = document.getElementById('shareBox');
+        var shareTokenText = document.getElementById('shareTokenText');
 
         function applyLoggedIn(email) {
           userCard.classList.add('vm-visible');
           guestList.classList.add('vm-hidden');
           emailEl.textContent = email || '';
           headerSub.textContent = '已登录，以下为账号与常用入口';
+        }
+
+        function showShareToken(tok) {
+          if (tok) {
+            shareTokenText.textContent = tok;
+            shareBox.style.display = '';
+          } else {
+            shareBox.style.display = 'none';
+          }
         }
 
         function applyGuest() {
@@ -241,9 +310,30 @@
                 vmSetUserEmail(d.email);
                 emailEl.textContent = d.email;
               }
+              if (d && d.share_token) {
+                showShareToken(d.share_token);
+              }
             })
             .catch(function () {});
         }
+
+        document.getElementById('copyShareToken').addEventListener('click', function () {
+          var t = shareTokenText.textContent;
+          if (!t) return;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(t).then(function () {
+              alert('已复制到剪贴板');
+            });
+          } else {
+            var ta = document.createElement('textarea');
+            ta.value = t;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+            alert('已复制到剪贴板');
+          }
+        });
 
         document.getElementById('logoutBtn').addEventListener('click', function () {
           vmLogout();

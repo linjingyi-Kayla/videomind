@@ -73,6 +73,43 @@ def _ensure_user_columns(engine) -> None:
                     )
 
 
+def _ensure_users_share_token_column(engine) -> None:
+    """users.share_token：快捷指令分享鉴权。"""
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if "share_token" not in cols:
+            if dialect == "sqlite":
+                conn.execute(text("ALTER TABLE users ADD COLUMN share_token VARCHAR(64)"))
+            else:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS share_token VARCHAR(64)"))
+
+
+def _migrate_share_tokens() -> None:
+    import secrets
+
+    from sqlalchemy import select
+
+    from .db_models import User
+
+    session = new_session()
+    try:
+        users = session.execute(select(User).where(User.share_token.is_(None))).scalars().all()
+        if not users:
+            return
+        for u in users:
+            u.share_token = secrets.token_hex(16)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def _migrate_orphan_user_ids() -> None:
     """
     将升级前遗留的 tasks / subscriptions（user_id 为空）绑定到「迁移用」账号，
@@ -100,9 +137,12 @@ def _migrate_orphan_user_ids() -> None:
         legacy_pwd = os.getenv("VIDEOMIND_LEGACY_PASSWORD", "changeme")
         user = session.execute(select(User).where(User.email == legacy_email)).scalars().first()
         if not user:
+            import secrets
+
             user = User(
                 email=legacy_email,
                 hashed_password=hash_password(legacy_pwd),
+                share_token=secrets.token_hex(16),
             )
             session.add(user)
             session.flush()
@@ -149,6 +189,8 @@ def init_db() -> None:
         Base.metadata.create_all(bind=engine)
         _ensure_task_columns(engine)
         _ensure_user_columns(engine)
+        _ensure_users_share_token_column(engine)
+        _migrate_share_tokens()
         _migrate_orphan_user_ids()
 
         insp = inspect(engine)
@@ -245,6 +287,8 @@ def init_db() -> None:
         Base.metadata.create_all(bind=engine)
         _ensure_task_columns(engine)
         _ensure_user_columns(engine)
+        _ensure_users_share_token_column(engine)
+        _migrate_share_tokens()
         _migrate_orphan_user_ids()
 
 
