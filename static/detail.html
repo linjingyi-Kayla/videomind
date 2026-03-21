@@ -3,23 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#faf8f3" />
+    <meta name="theme-color" content="#ffffff" />
     <link rel="manifest" href="/manifest.json" />
     <title>视频详情 · VideoMind</title>
     <style>
+      html { background: #fff; }
       :root {
-        --bg: #faf8f3;
-        --text: #1a1a1a;
+        --line: rgba(0, 0, 0, 0.08);
+        --text: #2a2a2a;
         --muted: #5c5c5c;
-        --card: #f3efe6;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
+        min-height: 100dvh;
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-        background: linear-gradient(160deg, var(--bg) 0%, #e8e2d6 100%);
+        background: #fff;
         color: var(--text);
-        padding-bottom: 160px;
+        padding-bottom: calc(150px + env(safe-area-inset-bottom));
       }
       header {
         position: sticky;
@@ -28,9 +29,9 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 12px 14px;
-        background: rgba(250, 248, 243, 0.92);
-        backdrop-filter: blur(12px);
+        padding: max(10px, env(safe-area-inset-top)) 14px 12px;
+        background: #fff;
+        border-bottom: 1px solid var(--line);
       }
       header a.back {
         text-decoration: none;
@@ -45,9 +46,9 @@
       }
       .media {
         aspect-ratio: 16/9;
-        border-radius: 16px;
+        border-radius: 12px;
         overflow: hidden;
-        background: #e0dcd4;
+        background: #f0f0f0;
         margin-bottom: 14px;
         position: relative;
       }
@@ -120,13 +121,12 @@
       textarea {
         width: 100%;
         min-height: 120px;
-        border-radius: 14px;
-        border: 0;
+        border-radius: 12px;
+        border: 1px solid var(--line);
         padding: 12px;
         font-size: 15px;
         resize: vertical;
-        background: rgba(255, 255, 255, 0.7);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        background: #fafafa;
       }
       .btn-save {
         margin-top: 10px;
@@ -141,15 +141,14 @@
         position: fixed;
         left: 0;
         right: 0;
-        bottom: 72px;
+        bottom: calc(52px + env(safe-area-inset-bottom));
         z-index: 70;
         display: flex;
         justify-content: center;
         gap: 12px;
         padding: 10px 14px;
-        background: rgba(250, 248, 243, 0.95);
-        backdrop-filter: blur(10px);
-        border-top: 1px solid rgba(0, 0, 0, 0.06);
+        background: #fff;
+        border-top: 1px solid var(--line);
       }
       .bottom-nav {
         position: fixed;
@@ -160,25 +159,24 @@
         display: flex;
         justify-content: space-around;
         align-items: center;
-        padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
-        background: rgba(250, 248, 243, 0.94);
-        backdrop-filter: blur(14px);
-        border-top: 1px solid rgba(0, 0, 0, 0.05);
+        padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+        background: #fff;
+        border-top: 1px solid var(--line);
       }
       .bottom-nav a {
         flex: 1;
         text-align: center;
         text-decoration: none;
-        color: #555;
-        font-size: 11px;
-        padding: 6px 4px;
+        color: #666;
+        font-size: 10px;
+        padding: 4px 2px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 4px;
+        gap: 2px;
       }
       .bottom-nav a.active {
-        color: #111;
+        color: #3d5c48;
         font-weight: 800;
       }
       .bottom-nav svg {
@@ -186,7 +184,8 @@
         height: 24px;
         stroke: currentColor;
         fill: none;
-        stroke-width: 1.8;
+        stroke-width: 1.65;
+        overflow: visible;
       }
     </style>
   </head>
@@ -264,7 +263,10 @@
           errEl.textContent = '缺少任务 id';
           return;
         }
-        const resp = await fetch('/api/tasks/' + encodeURIComponent(id), fetchOpts);
+        const resp = await fetch(
+          '/api/tasks/' + encodeURIComponent(id) + '?_=' + Date.now(),
+          fetchOpts
+        );
         if (!resp.ok) {
           errEl.style.display = '';
           errEl.textContent = '加载失败：' + (await resp.text());

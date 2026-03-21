@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import desc, select
 
@@ -36,6 +38,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class APINoCacheMiddleware(BaseHTTPMiddleware):
+    """避免浏览器/CDN 缓存 JSON API，导致列表/详情仍显示旧任务内容。"""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+
+app.add_middleware(APINoCacheMiddleware)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -210,6 +226,21 @@ def _extract_youtube_title_with_ytdlp(url: str) -> Optional[str]:
     return None
 
 
+def _friendly_push_body(t: Task) -> str:
+    """温和有趣的到期提醒文案（与视频标题绑定，避免千篇一律）。"""
+    title = (t.title or "这条视频").strip()
+    if len(title) > 40:
+        title = title[:40] + "…"
+    idx = int(hashlib.md5(t.task_uuid.encode("utf-8")).hexdigest(), 16) % 4
+    lines = [
+        f"「{title}」在书架等你啦～点开看几分钟，给大脑加个餐 ✨",
+        f"小提醒：{title} 可以复习了，趁排队/通勤刷一眼就好 📚",
+        f"学习卡送达：「{title}」总结已就绪，轻松看完再滑走～",
+        f"嘿，「{title}」喊你回来补课啦，点一下就能续上进度 🎧",
+    ]
+    return lines[idx]
+
+
 def _get_latest_subscription_id(session) -> Optional[str]:
     sub = session.execute(select(Subscription).order_by(desc(Subscription.created_at)).limit(1)).scalars().first()
     return sub.id if sub else None
@@ -226,6 +257,8 @@ async def _process_task(task_uuid: str) -> None:
             return
 
         extracted: Dict[str, Any] = await asyncio.to_thread(extract_video_text, task.video_url)
+        # 与 DB 一致，避免下游只读到旧 webpage_url
+        extracted["webpage_url"] = task.video_url
 
         # 如果标题缺失，yt-dlp 仅抓 title（无下载）。与 DeepSeek 并行以减少总耗时。
         extracted_title = extracted.get("title")
@@ -311,8 +344,8 @@ async def _send_due_tasks_loop() -> None:
                 }
 
                 payload = {
-                    "title": "VideoMind 提醒",
-                    "body": (t.summary or "")[:120] or "你的总结已就绪",
+                    "title": "VideoMind · 到点啦",
+                    "body": _friendly_push_body(t),
                     "task_id": t.task_uuid,
                     "url": t.video_url,
                 }

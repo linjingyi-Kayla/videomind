@@ -104,6 +104,9 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
     headers = {
         "X-RapidAPI-Key": rapid_api_key,
         "X-RapidAPI-Host": host,
+        # 降低代理/CDN 返回「上一次请求」字幕的概率
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
     # 先用 video_id 拉取；部分服务端字段名可能略有不同，这里做轻量兜底

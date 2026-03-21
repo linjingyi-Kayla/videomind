@@ -9,7 +9,7 @@ self.addEventListener('push', function (event) {
     }
   }
 
-  const title = payload.title || 'VideoMind 提醒';
+  const title = payload.title || 'VideoMind · 到点啦';
   const body = payload.body || '';
   const taskId = payload.task_id || '';
   const url = payload.url || '';

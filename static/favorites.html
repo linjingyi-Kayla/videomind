@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#d8d0c8" />
+    <meta name="theme-color" content="#ffffff" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
@@ -11,51 +11,29 @@
     <title>收藏 · VideoMind</title>
     <style>
       *, *::before, *::after { box-sizing: border-box; }
+      html { background: #fff; }
 
       :root {
-        --cream: rgb(249, 249, 247);
-        --cream-deep: #e4dfd6;
-        --text: #1f1d21;
-        --muted: #4d484c;
-        --accent-sage: #3d5244;
-        --accent-dust: #4a3d52;
+        --text: #2a2a2a;
+        --muted: #5c5c5c;
+        --line: rgba(0, 0, 0, 0.08);
+        --accent-sage: #3d5c48;
       }
       body {
         margin: 0;
-        min-height: 100vh;
+        min-height: 100dvh;
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-        background: var(--cream);
-        background-image:
-          linear-gradient(180deg, rgba(235, 215, 228, 0.42) 0%, transparent 45%),
-          linear-gradient(165deg, var(--cream) 0%, #ede8e0 52%, var(--cream-deep) 100%);
+        background: #fff;
         color: var(--text);
         position: relative;
-      }
-      body::before {
-        content: "";
-        position: fixed;
-        pointer-events: none;
-        left: 0;
-        right: 0;
-        top: 0;
-        height: min(72vh, 620px);
-        z-index: 0;
-        background:
-          radial-gradient(ellipse 140% 100% at 50% -8%, rgba(210, 165, 195, 0.28) 0%, transparent 55%),
-          radial-gradient(ellipse 85% 75% at -5% 12%, rgba(165, 200, 175, 0.22) 0%, transparent 48%),
-          radial-gradient(ellipse 85% 75% at 105% 15%, rgba(185, 170, 215, 0.24) 0%, transparent 48%),
-          radial-gradient(ellipse 60% 50% at 70% 0%, rgba(255, 210, 218, 0.18) 0%, transparent 45%),
-          linear-gradient(180deg, transparent 0%, var(--cream) 92%);
       }
       header {
         position: sticky;
         top: 0;
         z-index: 50;
-        background: rgba(242, 238, 232, 0.92);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border-bottom: 1px solid rgba(140, 120, 135, 0.2);
-        padding: 14px 8px;
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+        padding: max(10px, env(safe-area-inset-top)) 8px 12px;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -64,13 +42,9 @@
       .brand {
         font-family: "Playfair Display", "Iowan Old Style", Georgia, serif;
         font-weight: 700;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.1em;
         font-size: 24px;
-        color: transparent;
-        background: linear-gradient(118deg, #4a4248 0%, #6b5d68 38%, #4d5a50 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #2d2d2d;
       }
       header a {
         font-size: 14px;
@@ -81,7 +55,7 @@
       .content {
         position: relative;
         z-index: 1;
-        padding: 10px 6px 88px;
+        padding: 10px 6px calc(88px + env(safe-area-inset-bottom));
         max-width: 1200px;
         margin: 0 auto;
         width: 100%;
@@ -101,13 +75,11 @@
         }
       }
       .card {
-        background: rgba(255, 255, 255, 0.96);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(200, 190, 205, 0.45);
-        border-radius: 22px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
         padding: 12px 12px 10px;
-        box-shadow: 0 4px 14px rgba(55, 45, 65, 0.1), 0 2px 6px rgba(60, 70, 55, 0.06), 0 -1px 0 rgba(255, 255, 255, 1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
         position: relative;
         overflow: hidden;
         display: flex;
@@ -117,6 +89,7 @@
         align-self: stretch;
         width: 100%;
         height: 100%;
+        contain: layout;
       }
       .card-body {
         position: relative;
@@ -128,9 +101,9 @@
       }
       .card-media {
         margin: -12px -12px 10px -12px;
-        border-radius: 22px 22px 0 0;
+        border-radius: 15px 15px 0 0;
         overflow: hidden;
-        background: linear-gradient(145deg, #ddd8d2 0%, #cdd8d0 50%, #d8d2dc 100%);
+        background: #f0f0f0;
         aspect-ratio: 16/9;
         position: relative;
         flex-shrink: 0;
@@ -174,7 +147,7 @@
       }
       .summary-hint {
         font-size: 10px;
-        color: #6d5f72;
+        color: #888;
         margin-top: 2px;
         flex-shrink: 0;
       }
@@ -186,10 +159,9 @@
         align-items: center;
         gap: 6px;
         padding: 8px 10px;
-        border-radius: 14px;
-        border: 1px solid rgba(140, 155, 140, 0.35);
-        background: linear-gradient(180deg, rgba(232, 240, 232, 0.95) 0%, rgba(225, 218, 228, 0.85) 100%);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #fafafa;
         flex-shrink: 0;
       }
       .metaBtn {
@@ -205,23 +177,22 @@
         font-size: 10px;
         font-weight: 700;
         z-index: 2;
-        border: 1px solid rgba(255, 255, 255, 0.5);
-        box-shadow: 0 1px 4px rgba(80, 95, 85, 0.08);
+        border: 1px solid var(--line);
       }
       .pill.done {
-        color: #3d5248;
-        background: rgba(175, 198, 185, 0.65);
-        border-color: rgba(255, 255, 255, 0.55);
+        color: #2d4a38;
+        background: #dce8df;
+        border-color: #c8d8cc;
       }
       .pill.pending {
         color: #4a5568;
-        background: rgba(185, 192, 212, 0.55);
-        border-color: rgba(255, 255, 255, 0.45);
+        background: #e8eaf0;
+        border-color: #d0d4dc;
       }
       .pill.error {
-        color: #6b4548;
-        background: rgba(215, 185, 185, 0.5);
-        border-color: rgba(255, 255, 255, 0.4);
+        color: #8a4a4a;
+        background: #f5e8e8;
+        border-color: #e8d0d0;
       }
       .empty {
         text-align: center;
@@ -238,18 +209,15 @@
         display: flex;
         justify-content: space-around;
         align-items: center;
-        padding: 10px 4px calc(10px + env(safe-area-inset-bottom));
-        background: rgba(235, 230, 224, 0.96);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        border-top: 1px solid rgba(120, 100, 115, 0.22);
-        box-shadow: 0 -6px 24px rgba(55, 45, 60, 0.1);
+        padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+        background: #fff;
+        border-top: 1px solid var(--line);
       }
       .bottom-nav a {
         flex: 1;
         text-align: center;
         text-decoration: none;
-        color: #5c5358;
+        color: #666;
         font-size: 10px;
         padding: 4px 2px 2px;
         display: flex;

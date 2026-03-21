@@ -50,7 +50,11 @@ def _build_prompt(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "你是一个中文内容助理，擅长把视频内容快速总结给通勤/排队人群。"
         "你必须严格按我要求输出 JSON，不能输出多余文字。"
     )
+    page_url = str(payload.get("webpage_url") or "").strip()
     user = f"""
+【重要】当前请求只针对下面这一条视频页面（请严格对应该链接的字幕与标题，不要混入其他视频、历史会话或想象内容）：
+视频链接：{page_url or "(未提供)"}
+
 请基于以下视频信息，完成：分类、3个核心要点、总结、以及一条轻量推送提醒文案（适合通勤阅读）。
 
 要求：
