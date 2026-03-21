@@ -13,10 +13,13 @@
       /* 关键：默认 content-box 下 width:100% + padding 会撑破网格列，导致两列卡片重叠 */
       *, *::before, *::after { box-sizing: border-box; }
 
-      html{ background:#fff; }
+      html{
+        background:#f6f4f2;
+        min-height:100%;
+      }
 
       :root{
-        --bg:#ffffff;
+        --bg:rgba(255,255,255,0.92);
         --text:#2a2a2a;
         --muted:#5c5c5c;
         --muted2:#888888;
@@ -29,7 +32,12 @@
         margin:0;
         min-height:100dvh;
         font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-        background:var(--bg);
+        background-color:#faf8f6;
+        background-image:url('/static/images/home-bg.png');
+        background-repeat:no-repeat;
+        background-position:center center;
+        background-size:cover;
+        background-attachment:scroll;
         color:var(--text);
         position:relative;
       }
@@ -38,7 +46,9 @@
         position:sticky;
         top:0;
         z-index:50;
-        background:#fff;
+        background:rgba(255,255,255,0.82);
+        backdrop-filter:saturate(1.2) blur(10px);
+        -webkit-backdrop-filter:saturate(1.2) blur(10px);
         border-bottom:1px solid var(--line);
         padding:max(10px, env(safe-area-inset-top)) 8px 12px;
         display:flex;
@@ -351,7 +361,9 @@
         justify-content:space-around;
         align-items:center;
         padding:8px 4px calc(8px + env(safe-area-inset-bottom));
-        background:#fff;
+        background:rgba(255,255,255,0.88);
+        backdrop-filter:saturate(1.2) blur(10px);
+        -webkit-backdrop-filter:saturate(1.2) blur(10px);
         border-top:1px solid var(--line);
         box-shadow:none;
       }
