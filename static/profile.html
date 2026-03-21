@@ -36,10 +36,67 @@
         margin-top: 6px;
         line-height: 1.45;
       }
+
+      .user-card {
+        display: none;
+        max-width: 520px;
+        margin: 20px auto 16px;
+        padding: 20px 18px;
+        border-radius: 16px;
+        background: linear-gradient(165deg, #f4f6f8 0%, #fafafa 100%);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        text-align: center;
+      }
+      .user-card.vm-visible {
+        display: block;
+      }
+      .avatar {
+        width: 88px;
+        height: 88px;
+        margin: 0 auto 14px;
+        border-radius: 50%;
+        background: #e2e8f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+      }
+      .avatar svg {
+        width: 52px;
+        height: 52px;
+        opacity: 0.85;
+      }
+      .user-email {
+        font-size: 15px;
+        font-weight: 700;
+        color: #222;
+        word-break: break-all;
+        margin-bottom: 14px;
+      }
+      .btn-logout {
+        width: 100%;
+        max-width: 280px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        background: #fff;
+        font-weight: 700;
+        font-size: 14px;
+        color: #444;
+        cursor: pointer;
+      }
+      .btn-logout:active {
+        transform: translateY(1px);
+      }
+
       .list {
         max-width: 520px;
         margin: 16px auto;
         padding: 0 14px;
+      }
+      .list.vm-hidden {
+        display: none;
       }
       .row {
         display: block;
@@ -98,16 +155,40 @@
     </style>
   </head>
   <body>
+    <script src="/static/auth.js"></script>
     <header>
       <div class="brand">我的</div>
-      <div class="sub">登录与账号能力将在后续版本接入（当前为本地体验版）</div>
+      <div id="headerSub" class="sub">登录后可同步你的任务与提醒</div>
     </header>
-    <div class="list">
-      <a class="row" href="#" onclick="alert('即将支持：使用邮箱或 Apple 登录'); return false;">登录 / 注册 <span>›</span></a>
+
+    <div id="userCard" class="user-card">
+      <div class="avatar" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" fill="#cbd5e1" />
+          <circle cx="32" cy="26" r="12" fill="#64748b" />
+          <ellipse cx="32" cy="52" rx="18" ry="14" fill="#64748b" />
+        </svg>
+      </div>
+      <div id="userEmail" class="user-email"></div>
+      <button type="button" class="btn-logout" id="logoutBtn">退出登录</button>
+    </div>
+
+    <div id="guestList" class="list">
+      <a class="row" href="/login.html">登录 <span>›</span></a>
+      <a class="row" href="/register.html">注册 <span>›</span></a>
+    </div>
+
+    <div id="commonList" class="list">
       <a class="row" href="#" onclick="alert('设置：通知、主题等即将开放'); return false;">设置 <span>›</span></a>
-      <a class="row" href="#" onclick="alert('帮助中心：\\n1. 将本站添加到主屏幕可提升 iOS 推送到达率\\n2. 提醒依赖服务器与网络，若未收到请查看站内弹窗'); return false;">帮助中心 <span>›</span></a>
+      <a
+        class="row"
+        href="#"
+        onclick="alert('帮助中心：\\n1. 将本站添加到主屏幕可提升 iOS 推送到达率\\n2. 提醒依赖服务器与网络，若未收到请查看站内弹窗'); return false;"
+        >帮助中心 <span>›</span></a
+      >
       <a class="row" href="mailto:support@example.com?subject=VideoMind%20反馈">问题反馈 <span>›</span></a>
     </div>
+
     <nav class="bottom-nav" aria-label="主导航">
       <a href="/">
         <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round" /></svg>
@@ -122,5 +203,60 @@
         我的
       </a>
     </nav>
+
+    <script>
+      (function () {
+        var userCard = document.getElementById('userCard');
+        var guestList = document.getElementById('guestList');
+        var emailEl = document.getElementById('userEmail');
+        var headerSub = document.getElementById('headerSub');
+
+        function applyLoggedIn(email) {
+          userCard.classList.add('vm-visible');
+          guestList.classList.add('vm-hidden');
+          emailEl.textContent = email || '';
+          headerSub.textContent = '已登录，以下为账号与常用入口';
+        }
+
+        function applyGuest() {
+          userCard.classList.remove('vm-visible');
+          guestList.classList.remove('vm-hidden');
+          headerSub.textContent = '登录后可同步你的任务与提醒';
+        }
+
+        function refresh() {
+          if (!vmGetToken()) {
+            applyGuest();
+            return;
+          }
+          applyLoggedIn(vmGetUserEmail());
+
+          apiFetch('/api/me')
+            .then(function (r) {
+              if (!r.ok) throw new Error('me');
+              return r.json();
+            })
+            .then(function (d) {
+              if (d && d.email) {
+                vmSetUserEmail(d.email);
+                emailEl.textContent = d.email;
+              }
+            })
+            .catch(function () {});
+        }
+
+        document.getElementById('logoutBtn').addEventListener('click', function () {
+          vmLogout();
+          applyGuest();
+          location.reload();
+        });
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', refresh);
+        } else {
+          refresh();
+        }
+      })();
+    </script>
   </body>
 </html>

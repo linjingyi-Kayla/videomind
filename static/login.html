@@ -131,7 +131,10 @@
             errEl.textContent = data.detail || data.message || '登录失败';
             return;
           }
-          if (data.access_token) vmSetToken(data.access_token);
+          if (data.access_token) {
+            vmSetToken(data.access_token);
+            vmSetUserEmail(email);
+          }
           const next = qs('next');
           window.location.href = next && next.startsWith('/') ? next : '/';
         } catch (e) {

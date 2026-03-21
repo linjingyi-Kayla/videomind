@@ -388,10 +388,31 @@
     </style>
   </head>
   <body>
+    <script src="/static/auth.js"></script>
+    <script>
+      (function () {
+        function syncLoginBtn() {
+          var a = document.getElementById('loginBtn');
+          if (!a) return;
+          a.style.display = typeof vmGetToken === 'function' && vmGetToken() ? 'none' : 'inline-flex';
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', syncLoginBtn);
+        } else {
+          syncLoginBtn();
+        }
+      })();
+    </script>
     <header>
       <div class="brand">VideoMind</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <a href="/login.html" class="btn" style="text-decoration:none;display:inline-flex;align-items:center;">登录</a>
+        <a
+          id="loginBtn"
+          href="/login.html"
+          class="btn"
+          style="text-decoration:none;display:none;align-items:center;"
+          >登录</a
+        >
         <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
       </div>
     </header>
@@ -408,7 +429,6 @@
     </div>
     <div id="vmModalRoot" aria-live="polite"></div>
 
-    <script src="/static/auth.js"></script>
     <nav class="bottom-nav" aria-label="主导航">
       <a href="/" class="active">
         <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round"/></svg>
@@ -454,7 +474,10 @@
       }
 
       async function fetchVapidPublicKey() {
-        const resp = await fetch('/api/vapid-public-key', fetchOpts);
+        const resp = await fetch('/api/vapid-public-key', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
         const data = await resp.json();
         return data.publicKey;
       }

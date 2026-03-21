@@ -10,6 +10,21 @@ function vmSetToken(token) {
   else localStorage.removeItem('vm_access_token');
 }
 
+function vmGetUserEmail() {
+  return localStorage.getItem('vm_user_email') || '';
+}
+
+function vmSetUserEmail(email) {
+  if (email) localStorage.setItem('vm_user_email', email);
+  else localStorage.removeItem('vm_user_email');
+}
+
+/** 退出登录：清除 Token 与本地缓存的邮箱 */
+function vmLogout() {
+  vmSetToken(null);
+  vmSetUserEmail(null);
+}
+
 function vmAuthHeaders() {
   const h = { 'Cache-Control': 'no-cache' };
   const t = vmGetToken();
