@@ -41,14 +41,24 @@ def _build_prompt(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     subtitles = payload.get("subtitles_text") or ""
 
     # 关键：字幕优先；没有字幕时用 description+tags 兜底
-    text = subtitles.strip()
-    if not text:
+    raw_sub = subtitles.strip()
+    placeholder_no_sub = raw_sub in (
+        "",
+        "该视频暂无可用字幕",
+    ) or ("暂无可用字幕" in raw_sub and len(raw_sub) < 40)
+
+    text = raw_sub
+    if not text or placeholder_no_sub:
         text = (desc + "\n\n" + " ".join([f"#{t}" for t in tags if t])).strip()
+    # 无真实字幕轨时，向模型说明仅能用标题/简介归纳
+    no_sub_for_model = placeholder_no_sub
     text = text[:15000]  # MVP：限制输入长度，避免超长/超费
 
     system = (
         "你是一个中文内容助理，擅长把视频内容快速总结给通勤/排队人群。"
         "你必须严格按我要求输出 JSON，不能输出多余文字。"
+        "JSON 里所有字符串必须用英文半角双引号 \" 作为字段边界；"
+        "句末中文弯引号可以出现在字符串内容里，但字段结尾必须是 ASCII 的 \" 再跟逗号或括号。"
     )
     page_url = str(payload.get("webpage_url") or "").strip()
     user = f"""
@@ -74,8 +84,8 @@ def _build_prompt(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 {text if text else "(无字幕/无文本)"}
 
 补充说明：
-- 下面这段字幕是“原始字幕文本”，请先梳理其内部逻辑（按出现顺序/因果/结论），再产出总结；
-- 若字幕带时间戳，请把时间戳当作段落线索，不要原样堆叠到输出里；
+{f"- 【无字幕或仅有简介】本视频没有可用字幕文本：请仅依据上面的标题、简介与标签归纳，不要编造具体对话或细节；要点与总结需诚实标注信息来源有限（可委婉表达）。" if no_sub_for_model else "- 下面这段字幕是“原始字幕文本”，请先梳理其内部逻辑（按出现顺序/因果/结论），再产出总结；"}
+{f"" if no_sub_for_model else "- 若字幕带时间戳，请把时间戳当作段落线索，不要原样堆叠到输出里；"}
 - key_points（3条）建议按逻辑推进顺序输出。
 """.strip()
 
@@ -90,28 +100,80 @@ def analyze_video(payload: Dict[str, Any]) -> AIResult:
     resp = cli.chat.completions.create(
         model=_model_name(),
         temperature=0.2,
-        max_tokens=450,
+        # 长字幕时 summary/key_points 较长，450 易截断导致 JSON 不完整
+        max_tokens=1200,
         messages=_build_prompt(payload),
     )
     text = (resp.choices[0].message.content or "").strip()
 
-    # DeepSeek 偶尔会把 JSON 包在 ```json ... ``` 代码块里；这里做一次稳健提取
-    def _extract_json(s: str) -> str:
+    # DeepSeek 常把 JSON 包在 ```json ... ``` 里，或前后带说明文字；不能用简单 rfind("}")（串内/截断会错）
+    def _strip_code_fences(s: str) -> str:
         s = s.strip()
-        if s.startswith("```"):
-            # 去掉首尾 fence
+        if s.startswith("\ufeff"):
+            s = s.lstrip("\ufeff").strip()
+        # 可能为「说明文字」+ ```json ... ```；从首个 fence 起剥，闭合取最后一个 ```（避免非贪婪正则截断）
+        idx = s.find("```")
+        if idx != -1:
+            s = s[idx:]
             s = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", s)
-            s = re.sub(r"\s*```$", "", s)
-            s = s.strip()
-        # 兜底：截取第一对大括号
+            ri = s.rfind("```")
+            if ri != -1:
+                s = s[:ri].rstrip()
+        return s.strip()
+
+    def _first_json_object(s: str) -> str:
+        """从首个 { 起按括号深度截取完整 JSON 对象（尊重字符串内的引号转义）。"""
         i = s.find("{")
-        j = s.rfind("}")
-        if i != -1 and j != -1 and j > i:
-            return s[i : j + 1]
+        if i == -1:
+            return s
+        depth = 0
+        in_string = False
+        escape = False
+        for j in range(i, len(s)):
+            c = s[j]
+            if in_string:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_string = False
+                continue
+            if c == '"':
+                in_string = True
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[i : j + 1]
+        # 未闭合（截断）：仍交给 json.loads 报错，便于日志
+        return s[i:]
+
+    def _extract_json(s: str) -> str:
+        s = _strip_code_fences(s)
+        # 前面可能有「好的，如下」等废话，先找第一个 {
+        i = s.find("{")
+        if i > 0:
+            s = s[i:]
+        return _first_json_object(s)
+
+    def _repair_json_text(s: str) -> str:
+        """修复模型漏写 ASCII 闭合引号：中文右引号 ” 后紧跟 , ] } 的情况。"""
+        s = re.sub(r"”(\s*,)", r'”"\1', s)
+        s = re.sub(r"”(\s*])", r'”"\1', s)
+        s = re.sub(r"”(\s*})", r'”"\1', s)
         return s
 
+    raw_json = _extract_json(text)
     try:
-        data = json.loads(_extract_json(text))
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        try:
+            data = json.loads(_repair_json_text(raw_json))
+        except Exception as e2:
+            raise RuntimeError(f"DeepSeek 返回无法解析为 JSON：{text}") from e2
     except Exception as e:
         raise RuntimeError(f"DeepSeek 返回无法解析为 JSON：{text}") from e
 

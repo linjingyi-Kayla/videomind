@@ -784,14 +784,28 @@
         }
         const data = await resp.json();
         const items = data.items || [];
-        lastItems = items;
-
+        let sig = '';
         try {
-          const sig = JSON.stringify(items.map((x) => [x.id, x.status, x.summary && x.summary.slice(0, 40)]));
-          if (sig !== window.__vm_last_sig) {
-            window.__vm_last_sig = sig;
-          }
-        } catch (e) {}
+          sig = JSON.stringify(
+            (items || []).map((x) => [
+              x.id,
+              x.status,
+              x.title || '',
+              x.summary ? x.summary.slice(0, 80) : '',
+              x.remind_at_iso || '',
+              x.remind_due_pending ? 1 : 0
+            ])
+          );
+        } catch (e) {
+          sig = String(Date.now());
+        }
+        // 数据未变时不整页重绘，避免轮询导致列表「闪一下」
+        if (typeof window.__vm_history_sig === 'string' && sig === window.__vm_history_sig) {
+          lastItems = items;
+          return items;
+        }
+        window.__vm_history_sig = sig;
+        lastItems = items;
 
         showOverdueModalIfNeeded(items);
 
@@ -975,15 +989,38 @@
         navigator.serviceWorker.register('/service-worker.js').catch(console.error);
       }
 
-      // 每 8 秒轮询一次，避免缓存导致「分享后不出现 / Pending 不更新」
+      // 轮询：pending 时略快；否则拉长间隔。用 setTimeout 链避免慢请求与 interval 重叠
+      function pollIntervalMs() {
+        try {
+          const pend = (lastItems || []).some((x) => x.status === 'pending');
+          return pend ? 16000 : 32000;
+        } catch (e) {
+          return 24000;
+        }
+      }
+      function scheduleHistoryPoll() {
+        if (window.__vm_poll) clearTimeout(window.__vm_poll);
+        const ms = pollIntervalMs();
+        window.__vm_poll = setTimeout(() => {
+          refreshHistory()
+            .then(() => {
+              scheduleHistoryPoll();
+            })
+            .catch(() => {
+              scheduleHistoryPoll();
+            });
+        }, ms);
+      }
       refreshHistory()
         .then(() => {
-          if (window.__vm_poll) clearInterval(window.__vm_poll);
-          window.__vm_poll = setInterval(() => {
-            refreshHistory().catch(() => {});
-          }, 8000);
+          scheduleHistoryPoll();
         })
         .catch(console.error);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          refreshHistory().catch(() => {});
+        }
+      });
     </script>
   </body>
 </html>

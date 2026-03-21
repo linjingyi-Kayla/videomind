@@ -199,6 +199,21 @@ def _calc_next_remind_datetime(hhmm: str, tz_offset_minutes: Optional[int] = Non
     return utc_candidate
 
 
+def _fallback_title_from_summary(summary: Optional[str]) -> Optional[str]:
+    """DeepSeek / RapidAPI 都无标题时，用总结首行作展示标题。"""
+    if not summary or not str(summary).strip():
+        return None
+    line = str(summary).strip().split("\n")[0].strip()
+    if len(line) > 72:
+        line = line[:72].rstrip() + "…"
+    return line or None
+
+
+def _is_youtube_url(url: str) -> bool:
+    u = (url or "").lower()
+    return "youtube.com" in u or "youtu.be" in u or "youtube-nocookie.com" in u
+
+
 def _extract_youtube_title_with_ytdlp(url: str) -> Optional[str]:
     """
     仅提取元信息 title，不下载媒体文件，避免生成临时文件。
@@ -262,11 +277,16 @@ async def _process_task(task_uuid: str) -> None:
         # 与 DB 一致，避免下游只读到旧 webpage_url
         extracted["webpage_url"] = task.video_url
 
-        # 如果标题缺失，yt-dlp 仅抓 title（无下载）。与 DeepSeek 并行以减少总耗时。
-        extracted_title = extracted.get("title")
+        # YouTube：始终并行拉 yt-dlp 标题（RapidAPI 有时无 title），再与抽取结果合并
         title_future = None
-        if not extracted_title:
+        if _is_youtube_url(task.video_url):
             title_future = asyncio.to_thread(_extract_youtube_title_with_ytdlp, task.video_url)
+
+        extracted_title = extracted.get("title")
+        if isinstance(extracted_title, str):
+            extracted_title = extracted_title.strip() or None
+        elif extracted_title is not None:
+            extracted_title = str(extracted_title).strip() or None
 
         ai = await asyncio.to_thread(analyze_video, extracted)
 
@@ -281,10 +301,13 @@ async def _process_task(task_uuid: str) -> None:
             except ValueError:
                 _tz_ai = None
         remind_at_dt = _calc_next_remind_datetime(ai.remind_at, _tz_ai)
-        # title 优先来自抽取结果；若缺失则用 yt-dlp 再兜底一次
+        yt_title: Optional[str] = None
         if title_future:
-            extracted_title = await title_future
-        task.title = str(extracted_title).strip() if extracted_title else "未命名视频"
+            yt_title = await title_future
+        merged = (extracted_title or yt_title or "").strip()
+        if not merged:
+            merged = (_fallback_title_from_summary(summary) or "").strip()
+        task.title = merged if merged else "未命名视频"
         task.category = ai.category
         task.summary = summary
         task.key_points_json = key_points_json
