@@ -390,7 +390,10 @@
   <body>
     <header>
       <div class="brand">VideoMind</div>
-      <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <a href="/login.html" class="btn" style="text-decoration:none;display:inline-flex;align-items:center;">登录</a>
+        <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
+      </div>
     </header>
 
     <div class="content">
@@ -405,6 +408,7 @@
     </div>
     <div id="vmModalRoot" aria-live="polite"></div>
 
+    <script src="/static/auth.js"></script>
     <nav class="bottom-nav" aria-label="主导航">
       <a href="/" class="active">
         <svg viewBox="0 0 24 24"><path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z" stroke-linejoin="round"/></svg>
@@ -431,8 +435,6 @@
       let selectedCategory = 'all';
 
       let lastItems = [];
-
-      const fetchOpts = { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } };
 
       function getSubscriptionId() {
         return localStorage.getItem('subscription_id');
@@ -500,9 +502,9 @@
           applicationServerKey
         });
 
-        const resp = await fetch('/api/subscribe', {
+        const resp = await apiFetch('/api/subscribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sub),
           cache: 'no-store'
         });
@@ -696,9 +698,9 @@
       }
 
       async function updateRemindAt(taskId, hhmm) {
-        const resp = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
+        const resp = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             remind_at: hhmm,
             tz_offset_minutes: new Date().getTimezoneOffset()
@@ -776,7 +778,7 @@
           (subscriptionId
             ? '/api/history?subscription_id=' + encodeURIComponent(subscriptionId) + '&'
             : '/api/history?') + '_=' + Date.now();
-        const resp = await fetch(historyUrl, fetchOpts);
+        const resp = await apiFetch(historyUrl);
         if (!resp.ok) {
           historyEl.innerHTML = '';
           emptyEl.style.display = '';

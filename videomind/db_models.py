@@ -3,12 +3,21 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Subscription(Base):
@@ -23,6 +32,10 @@ class Subscription(Base):
 
     expiration_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
 
 
 class Task(Base):
@@ -51,6 +64,11 @@ class Task(Base):
     # per_subscription 模式：任务属于哪个订阅（subscription.id）
     # 如果为 None，则表示“未关联订阅”（MVP 可广播或回填到最近订阅）
     subscription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+
+    # 多用户：任务归属
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
 
     # 收藏 / 用户批注（详情页持久化）
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

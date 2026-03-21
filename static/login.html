@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>登录 · VideoMind</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: #fafafa;
+        color: #222;
+        padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+      }
+      header {
+        text-align: center;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        margin: 0 0 8px;
+      }
+      .card {
+        max-width: 400px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        padding: 20px 18px;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        color: #444;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid #ddd;
+        font-size: 16px;
+        margin-bottom: 14px;
+      }
+      .btn {
+        width: 100%;
+        padding: 14px;
+        border-radius: 14px;
+        border: 0;
+        font-weight: 800;
+        font-size: 15px;
+        cursor: pointer;
+        background: #2d3a4a;
+        color: #fff;
+      }
+      .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .err {
+        color: #b42318;
+        font-size: 14px;
+        margin-bottom: 10px;
+        margin-top: -6px;
+      }
+      .link {
+        text-align: center;
+        margin-top: 16px;
+        font-size: 14px;
+      }
+      .link a {
+        color: #2d5a4a;
+        font-weight: 700;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>VideoMind</h1>
+      <p style="margin:0;color:#666;font-size:14px;">使用邮箱登录</p>
+    </header>
+    <div class="card">
+      <div id="err" class="err" style="display: none"></div>
+      <form id="form">
+        <label for="email">邮箱</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" />
+        <button type="submit" class="btn" id="btn">登录</button>
+      </form>
+      <div class="link">
+        没有账号？<a href="/register.html">注册</a> · <a href="/">返回首页</a>
+      </div>
+    </div>
+
+    <script src="/static/auth.js"></script>
+    <script>
+      const form = document.getElementById('form');
+      const errEl = document.getElementById('err');
+      const btn = document.getElementById('btn');
+
+      function qs(name) {
+        const u = new URLSearchParams(window.location.search);
+        return u.get(name);
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errEl.style.display = 'none';
+        btn.disabled = true;
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        try {
+          const resp = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+            body: JSON.stringify({ email, password }),
+            cache: 'no-store'
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            errEl.style.display = '';
+            errEl.textContent = data.detail || data.message || '登录失败';
+            return;
+          }
+          if (data.access_token) vmSetToken(data.access_token);
+          const next = qs('next');
+          window.location.href = next && next.startsWith('/') ? next : '/';
+        } catch (e) {
+          errEl.style.display = '';
+          errEl.textContent = String(e);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

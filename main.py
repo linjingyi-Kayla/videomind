@@ -11,17 +11,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
 
 from videomind.ai_service import analyze_video
+from videomind.auth import create_access_token, get_user_by_token, hash_password, verify_password
 from videomind.db import init_db, new_session
-from videomind.db_models import Subscription, Task
+from videomind.db_models import Subscription, Task, User
 from videomind.extractor import extract_video_text
 from videomind.webpush import send_web_push
 
@@ -122,6 +124,47 @@ class TaskPatchRequest(BaseModel):
 class HistoryResponse(BaseModel):
     subscription_id: Optional[str]
     items: List[HistoryItem]
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class MeResponse(BaseModel):
+    id: int
+    email: str
+
+
+def get_db():
+    db = new_session()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+) -> User:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="未登录或缺少 Authorization: Bearer Token")
+    token = authorization.split(" ", 1)[1].strip()
+    user = get_user_by_token(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="登录已过期或 Token 无效")
+    return user
 
 
 def _now_utc() -> datetime:
@@ -258,8 +301,18 @@ def _friendly_push_body(t: Task) -> str:
     return lines[idx]
 
 
-def _get_latest_subscription_id(session) -> Optional[str]:
-    sub = session.execute(select(Subscription).order_by(desc(Subscription.created_at)).limit(1)).scalars().first()
+def _get_latest_subscription_id(session, user_id: int) -> Optional[str]:
+    """当前用户最近一次 Web Push 订阅。"""
+    sub = (
+        session.execute(
+            select(Subscription)
+            .where(Subscription.user_id == user_id)
+            .order_by(desc(Subscription.created_at))
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
     return sub.id if sub else None
 
 
@@ -351,17 +404,31 @@ async def _send_due_tasks_loop() -> None:
             if not due:
                 continue
 
-            latest_sub_id = _get_latest_subscription_id(session)
-
             for t in due:
-                sub_id = t.subscription_id or latest_sub_id
-                if not sub_id:
-                    logger.warning("skip push: task %s has no subscription row", t.task_uuid)
-                    continue
-                sub = session.get(Subscription, sub_id)
-                if not sub:
-                    logger.warning("skip push: subscription %s missing for task %s", sub_id, t.task_uuid)
-                    continue
+                uid = t.user_id
+                sub_id = t.subscription_id
+                if sub_id:
+                    sub = session.get(Subscription, sub_id)
+                    if not sub:
+                        logger.warning("skip push: subscription %s missing for task %s", sub_id, t.task_uuid)
+                        continue
+                    if uid is not None and sub.user_id is not None and sub.user_id != uid:
+                        logger.warning(
+                            "skip push: subscription %s user mismatch for task %s", sub_id, t.task_uuid
+                        )
+                        continue
+                else:
+                    if uid is None:
+                        logger.warning("skip push: task %s has no user_id", t.task_uuid)
+                        continue
+                    sub_id = _get_latest_subscription_id(session, uid)
+                    if not sub_id:
+                        logger.warning("skip push: task %s has no subscription for user", t.task_uuid)
+                        continue
+                    sub = session.get(Subscription, sub_id)
+                    if not sub:
+                        logger.warning("skip push: subscription %s missing for task %s", sub_id, t.task_uuid)
+                        continue
 
                 subscription_obj = {
                     "endpoint": sub.endpoint,
@@ -418,6 +485,22 @@ async def page_profile() -> FileResponse:
     raise HTTPException(status_code=404, detail="profile.html not found")
 
 
+@app.get("/login.html", include_in_schema=False)
+async def page_login() -> FileResponse:
+    p = STATIC_DIR / "login.html"
+    if p.exists():
+        return _html_response(p)
+    raise HTTPException(status_code=404, detail="login.html not found")
+
+
+@app.get("/register.html", include_in_schema=False)
+async def page_register() -> FileResponse:
+    p = STATIC_DIR / "register.html"
+    if p.exists():
+        return _html_response(p)
+    raise HTTPException(status_code=404, detail="register.html not found")
+
+
 @app.get("/manifest.json", include_in_schema=False)
 async def manifest_json() -> FileResponse:
     # Railway 运行时的工作目录可能与本地不同；这里做兜底，确保 manifest 一定可返回
@@ -468,8 +551,37 @@ async def vapid_public_key() -> JSONResponse:
     return JSONResponse({"publicKey": key})
 
 
+@app.post("/api/register")
+def register(body: RegisterRequest, db: Session = Depends(get_db)) -> JSONResponse:
+    email = str(body.email).lower().strip()
+    exists = db.execute(select(User).where(User.email == email)).scalars().first()
+    if exists:
+        raise HTTPException(status_code=400, detail="该邮箱已注册")
+    u = User(email=email, hashed_password=hash_password(body.password))
+    db.add(u)
+    db.commit()
+    return JSONResponse({"ok": True, "message": "注册成功"})
+
+
+@app.post("/api/login", response_model=TokenResponse)
+def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    email = str(body.email).lower().strip()
+    user = db.execute(select(User).where(User.email == email)).scalars().first()
+    if not user or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+    return TokenResponse(access_token=create_access_token(user.id))
+
+
+@app.get("/api/me", response_model=MeResponse)
+def me(current_user: User = Depends(get_current_user)) -> MeResponse:
+    return MeResponse(id=current_user.id, email=current_user.email)
+
+
 @app.post("/api/subscribe", response_model=SubscribeResponse)
-async def subscribe(req: PushSubscriptionIn) -> SubscribeResponse:
+async def subscribe(
+    req: PushSubscriptionIn,
+    current_user: User = Depends(get_current_user),
+) -> SubscribeResponse:
     """
     保存前端 PushSubscription（endpoint + keys）
     """
@@ -480,6 +592,7 @@ async def subscribe(req: PushSubscriptionIn) -> SubscribeResponse:
         if existing:
             existing.p256dh = req.keys["p256dh"]
             existing.auth = req.keys["auth"]
+            existing.user_id = current_user.id
             existing.expiration_time = (
                 datetime.fromtimestamp(req.expirationTime, tz=timezone.utc).replace(tzinfo=None)
                 if req.expirationTime
@@ -494,6 +607,7 @@ async def subscribe(req: PushSubscriptionIn) -> SubscribeResponse:
             endpoint=req.endpoint,
             p256dh=req.keys["p256dh"],
             auth=req.keys["auth"],
+            user_id=current_user.id,
             expiration_time=(
                 datetime.fromtimestamp(req.expirationTime, tz=timezone.utc).replace(tzinfo=None)
                 if req.expirationTime
@@ -508,8 +622,7 @@ async def subscribe(req: PushSubscriptionIn) -> SubscribeResponse:
         session.close()
 
 
-@app.post("/api/summarize", response_model=SummarizeResponse)
-async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> SummarizeResponse:
+def _summarize_for_user(user_id: int, req: SummarizeRequest, background: BackgroundTasks) -> SummarizeResponse:
     """
     后台处理模式：
     - 创建 tasks 记录（pending）
@@ -520,7 +633,7 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
     try:
         sub_id = req.subscription_id
         if not sub_id:
-            sub_id = _get_latest_subscription_id(session)
+            sub_id = _get_latest_subscription_id(session, user_id)
 
         task_uuid = uuid.uuid4().hex
         t = Task(
@@ -534,6 +647,7 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
             status="pending",
             error_message=None,
             subscription_id=sub_id,
+            user_id=user_id,
             created_at=_now_utc().replace(tzinfo=None),
             updated_at=_now_utc().replace(tzinfo=None),
         )
@@ -546,23 +660,38 @@ async def summarize(req: SummarizeRequest, background: BackgroundTasks) -> Summa
     return SummarizeResponse(task_id=task_uuid, status="pending")
 
 
-@app.get("/api/history", response_model=HistoryResponse)
-async def history(subscription_id: Optional[str] = None) -> HistoryResponse:
-    """
-    返回已总结/处理中任务列表（供 PWA 看板展示）
+@app.post("/api/summarize", response_model=SummarizeResponse)
+async def summarize(
+    req: SummarizeRequest,
+    background: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> SummarizeResponse:
+    return _summarize_for_user(current_user.id, req, background)
 
-    单用户 PWA：必须始终返回「最近任务」，不能只按 subscription_id 过滤。
-    否则会出现：本地已有订阅 A 时，新导入任务若 subscription_id 为 None 或与 A 不一致，
-    列表里永远看不到新任务，直到「清空/重开」等偶然触发全量查询。
+
+@app.get("/api/history", response_model=HistoryResponse)
+async def history(
+    subscription_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+) -> HistoryResponse:
+    """
+    返回当前登录用户的最近任务（最多 50 条）。
     """
     session = new_session()
     try:
         target_sid = subscription_id
         if not target_sid:
-            target_sid = _get_latest_subscription_id(session)
+            target_sid = _get_latest_subscription_id(session, current_user.id)
 
         items = (
-            session.execute(select(Task).order_by(desc(Task.created_at)).limit(50)).scalars().all()
+            session.execute(
+                select(Task)
+                .where(Task.user_id == current_user.id)
+                .order_by(desc(Task.created_at))
+                .limit(50)
+            )
+            .scalars()
+            .all()
         )
 
         out: List[HistoryItem] = []
@@ -580,13 +709,23 @@ class UpdateRemindAtRequest(BaseModel):
 
 
 @app.post("/api/tasks/{task_id}/remind-at", response_model=HistoryItem)
-async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> HistoryItem:
+async def update_task_remind_at(
+    task_id: str,
+    req: UpdateRemindAtRequest,
+    current_user: User = Depends(get_current_user),
+) -> HistoryItem:
     """
     更新某个任务的提醒时间（HH:MM），并将 is_notified=false 以便 scheduler 再次推送。
     """
     session = new_session()
     try:
-        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
+        task = (
+            session.execute(
+                select(Task).where(Task.task_uuid == task_id, Task.user_id == current_user.id)
+            )
+            .scalars()
+            .first()
+        )
         if not task:
             raise HTTPException(status_code=404, detail="task_id 不存在")
         if task.subscription_id is None:
@@ -606,10 +745,16 @@ async def update_task_remind_at(task_id: str, req: UpdateRemindAtRequest) -> His
 
 
 @app.get("/api/tasks/{task_id}", response_model=HistoryItem)
-async def get_task(task_id: str) -> HistoryItem:
+async def get_task(task_id: str, current_user: User = Depends(get_current_user)) -> HistoryItem:
     session = new_session()
     try:
-        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
+        task = (
+            session.execute(
+                select(Task).where(Task.task_uuid == task_id, Task.user_id == current_user.id)
+            )
+            .scalars()
+            .first()
+        )
         if not task:
             raise HTTPException(status_code=404, detail="task_id 不存在")
         return _history_item_from_task(task)
@@ -618,11 +763,21 @@ async def get_task(task_id: str) -> HistoryItem:
 
 
 @app.patch("/api/tasks/{task_id}", response_model=HistoryItem)
-async def patch_task(task_id: str, req: TaskPatchRequest) -> HistoryItem:
+async def patch_task(
+    task_id: str,
+    req: TaskPatchRequest,
+    current_user: User = Depends(get_current_user),
+) -> HistoryItem:
     """更新收藏、批注等字段。"""
     session = new_session()
     try:
-        task = session.execute(select(Task).where(Task.task_uuid == task_id)).scalars().first()
+        task = (
+            session.execute(
+                select(Task).where(Task.task_uuid == task_id, Task.user_id == current_user.id)
+            )
+            .scalars()
+            .first()
+        )
         if not task:
             raise HTTPException(status_code=404, detail="task_id 不存在")
         if req.is_favorite is not None:
@@ -641,24 +796,41 @@ async def patch_task(task_id: str, req: TaskPatchRequest) -> HistoryItem:
 async def share_target(request: Request, background: BackgroundTasks) -> JSONResponse:
     """
     Web Share Target 入口：接收来自 iOS 的分享 URL，然后创建任务并在后台处理。
+    需在 Header 带 Authorization: Bearer，或在 JSON/form 中传 access_token（与登录返回一致）。
     """
     content_type = request.headers.get("content-type", "")
     url: Optional[str] = None
+    token: Optional[str] = None
+    auth_h = request.headers.get("authorization")
+    if auth_h and auth_h.lower().startswith("bearer "):
+        token = auth_h.split(" ", 1)[1].strip()
     try:
         if "application/json" in content_type:
             body = await request.json()
             url = body.get("url")
+            token = token or body.get("access_token")
         else:
             form = await request.form()
             url = form.get("url")
+            token = token or form.get("access_token")
     except Exception:
         url = None
 
     if not url:
         raise HTTPException(status_code=400, detail="缺少 url 参数")
+    if not token:
+        raise HTTPException(status_code=401, detail="需要登录：请在 Header 携带 Authorization: Bearer，或传入 access_token")
+
+    session = new_session()
+    try:
+        user = get_user_by_token(session, token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Token 无效或已过期")
+    finally:
+        session.close()
 
     req = SummarizeRequest(url=url)  # type: ignore[arg-type]
-    resp = await summarize(req, background=background)  # reuse logic
+    resp = _summarize_for_user(user.id, req, background)
     return JSONResponse(resp.model_dump())
 
 

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>注册 · VideoMind</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: #fafafa;
+        color: #222;
+        padding: 24px 16px;
+      }
+      h1 {
+        text-align: center;
+        font-size: 22px;
+        font-weight: 800;
+        margin: 0 0 24px;
+      }
+      .card {
+        max-width: 400px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        padding: 20px 18px;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid #ddd;
+        font-size: 16px;
+        margin-bottom: 14px;
+      }
+      .btn {
+        width: 100%;
+        padding: 14px;
+        border-radius: 14px;
+        border: 0;
+        font-weight: 800;
+        font-size: 15px;
+        cursor: pointer;
+        background: #2d3a4a;
+        color: #fff;
+      }
+      .err {
+        color: #b42318;
+        font-size: 14px;
+        margin-bottom: 10px;
+      }
+      .ok {
+        color: #1d6b3a;
+        font-size: 14px;
+        margin-bottom: 10px;
+      }
+      .link {
+        text-align: center;
+        margin-top: 16px;
+        font-size: 14px;
+      }
+      .link a {
+        color: #2d5a4a;
+        font-weight: 700;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>注册账号</h1>
+    <div class="card">
+      <div id="err" class="err" style="display: none"></div>
+      <div id="ok" class="ok" style="display: none"></div>
+      <form id="form">
+        <label for="email">邮箱</label>
+        <input id="email" name="email" type="email" required />
+        <label for="password">密码（至少 8 位）</label>
+        <input id="password" name="password" type="password" required minlength="8" />
+        <button type="submit" class="btn" id="btn">注册</button>
+      </form>
+      <div class="link"><a href="/login.html">已有账号？去登录</a></div>
+    </div>
+    <script>
+      const form = document.getElementById('form');
+      const errEl = document.getElementById('err');
+      const okEl = document.getElementById('ok');
+      const btn = document.getElementById('btn');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errEl.style.display = 'none';
+        okEl.style.display = 'none';
+        btn.disabled = true;
+        try {
+          const resp = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: document.getElementById('email').value.trim(),
+              password: document.getElementById('password').value
+            }),
+            cache: 'no-store'
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            errEl.style.display = '';
+            errEl.textContent = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data);
+            return;
+          }
+          okEl.style.display = '';
+          okEl.textContent = '注册成功，正在跳转登录…';
+          setTimeout(() => {
+            window.location.href = '/login.html';
+          }, 800);
+        } catch (e) {
+          errEl.style.display = '';
+          errEl.textContent = String(e);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

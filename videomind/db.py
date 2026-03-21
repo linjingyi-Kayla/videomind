@@ -4,10 +4,10 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .db_models import Base
+from .db_models import Base, User  # noqa: F401 — User 需载入以注册 metadata
 
 
 def _db_path() -> str:
@@ -41,6 +41,82 @@ def create_engine_and_session() -> tuple:
 engine, SessionLocal = create_engine_and_session()
 
 
+def _ensure_user_columns(engine) -> None:
+    """创建 users 表；为 tasks / subscriptions 增加 user_id（多用户）。"""
+    insp = inspect(engine)
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if "users" not in insp.get_table_names():
+            Base.metadata.create_all(bind=engine)
+            insp = inspect(engine)
+
+        if "tasks" in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns("tasks")}
+            if "user_id" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(text("ALTER TABLE tasks ADD COLUMN user_id INTEGER"))
+                else:
+                    conn.execute(
+                        text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)")
+                    )
+
+        if "subscriptions" in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns("subscriptions")}
+            if "user_id" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(text("ALTER TABLE subscriptions ADD COLUMN user_id INTEGER"))
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)"
+                        )
+                    )
+
+
+def _migrate_orphan_user_ids() -> None:
+    """
+    将升级前遗留的 tasks / subscriptions（user_id 为空）绑定到「迁移用」账号，
+    便于多用户改造后仍能访问旧数据。新账号邮箱请勿与 VIDEOMIND_LEGACY_EMAIL 冲突。
+    """
+    import os
+
+    from sqlalchemy import select
+
+    from .auth import hash_password
+    from .db_models import Subscription, Task, User
+
+    session = new_session()
+    try:
+        orphan_t = session.execute(select(Task).where(Task.user_id.is_(None)).limit(1)).scalars().first()
+        orphan_s = (
+            session.execute(select(Subscription).where(Subscription.user_id.is_(None)).limit(1))
+            .scalars()
+            .first()
+        )
+        if not orphan_t and not orphan_s:
+            return
+
+        legacy_email = os.getenv("VIDEOMIND_LEGACY_EMAIL", "legacy@videomind.local").strip().lower()
+        legacy_pwd = os.getenv("VIDEOMIND_LEGACY_PASSWORD", "changeme")
+        user = session.execute(select(User).where(User.email == legacy_email)).scalars().first()
+        if not user:
+            user = User(
+                email=legacy_email,
+                hashed_password=hash_password(legacy_pwd),
+            )
+            session.add(user)
+            session.flush()
+
+        session.execute(update(Task).where(Task.user_id.is_(None)).values(user_id=user.id))
+        session.execute(update(Subscription).where(Subscription.user_id.is_(None)).values(user_id=user.id))
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def _ensure_task_columns(engine) -> None:
     """为已存在的 tasks 表补齐 ORM 新增列（不删数据）。"""
     insp = inspect(engine)
@@ -72,6 +148,8 @@ def init_db() -> None:
         # 先确保 ORM 声明的表存在（只创建缺失对象，不覆盖已有数据）
         Base.metadata.create_all(bind=engine)
         _ensure_task_columns(engine)
+        _ensure_user_columns(engine)
+        _migrate_orphan_user_ids()
 
         insp = inspect(engine)
         tables = insp.get_table_names()
@@ -166,6 +244,8 @@ def init_db() -> None:
     except Exception:
         Base.metadata.create_all(bind=engine)
         _ensure_task_columns(engine)
+        _ensure_user_columns(engine)
+        _migrate_orphan_user_ids()
 
 
 def new_session() -> Session:

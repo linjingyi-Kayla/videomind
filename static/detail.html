@@ -231,9 +231,8 @@
       </a>
     </nav>
 
+    <script src="/static/auth.js"></script>
     <script>
-      const fetchOpts = { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } };
-
       function qs(name) {
         const u = new URLSearchParams(window.location.search);
         return u.get(name);
@@ -321,9 +320,9 @@
         heart.onclick = async () => {
           if (!taskState) return;
           const next = !taskState.is_favorite;
-          const r = await fetch('/api/tasks/' + encodeURIComponent(id), {
+          const r = await apiFetch('/api/tasks/' + encodeURIComponent(id), {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ is_favorite: next }),
             cache: 'no-store',
           });
@@ -354,10 +353,7 @@
       wireActionsOnce();
 
       async function fetchAndRender(silent) {
-        const resp = await fetch(
-          '/api/tasks/' + encodeURIComponent(id) + '?_=' + Date.now(),
-          fetchOpts
-        );
+        const resp = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '?_=' + Date.now());
         if (!resp.ok) {
           if (!silent) {
             errEl.style.display = '';

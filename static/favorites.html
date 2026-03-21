@@ -264,9 +264,8 @@
         我的
       </a>
     </nav>
+    <script src="/static/auth.js"></script>
     <script>
-      const fetchOpts = { cache: "no-store", headers: { "Cache-Control": "no-cache" } };
-
       function toast(msg) {
         const t = document.createElement("div");
         t.style.cssText =
@@ -305,9 +304,9 @@
       }
 
       async function updateRemindAt(taskId, hhmm) {
-        const resp = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
+        const resp = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/remind-at`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             remind_at: hhmm,
             tz_offset_minutes: new Date().getTimezoneOffset()
@@ -524,7 +523,7 @@
       async function load() {
         const sub = localStorage.getItem("subscription_id");
         const url = sub ? "/api/history?subscription_id=" + encodeURIComponent(sub) : "/api/history";
-        const resp = await fetch(url, fetchOpts);
+        const resp = await apiFetch(url + (url.includes("?") ? "&" : "?") + "_=" + Date.now());
         const data = await resp.json();
         const items = (data.items || []).filter((x) => x.is_favorite);
         renderCards(items);
