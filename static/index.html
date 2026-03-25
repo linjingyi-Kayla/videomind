@@ -50,11 +50,81 @@
         backdrop-filter:saturate(1.2) blur(10px);
         -webkit-backdrop-filter:saturate(1.2) blur(10px);
         border-bottom:1px solid var(--line);
-        padding:max(10px, env(safe-area-inset-top)) 8px 12px;
+        padding:max(10px, env(safe-area-inset-top)) 12px 12px;
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+        gap:0;
+      }
+
+      .site-header-row{
         display:flex;
         align-items:center;
         justify-content:space-between;
         gap:12px;
+        width:100%;
+      }
+
+      .vm-import-bar{
+        display:flex;
+        align-items:stretch;
+        gap:8px;
+        width:100%;
+        margin-top:10px;
+      }
+      .vm-import-bar input[type="text"]{
+        flex:1;
+        min-width:0;
+        border:1px solid var(--line);
+        border-radius:12px;
+        padding:10px 12px;
+        font-size:14px;
+        background:rgba(255,255,255,0.72);
+        color:var(--text);
+        outline:none;
+        -webkit-appearance:none;
+        appearance:none;
+      }
+      .vm-import-bar input[type="text"]::placeholder{
+        color:#9a9a9a;
+      }
+      .vm-import-bar input[type="text"]:disabled{
+        opacity:0.75;
+      }
+      .vm-import-btn{
+        flex-shrink:0;
+        padding:10px 16px;
+        border-radius:12px;
+        border:1px solid rgba(61,92,72,0.35);
+        background:rgba(255,255,255,0.88);
+        color:var(--accent-sage);
+        font-weight:700;
+        font-size:14px;
+        cursor:pointer;
+        white-space:nowrap;
+        box-shadow:0 1px 2px rgba(0,0,0,0.04);
+        position:relative;
+        min-width:72px;
+      }
+      .vm-import-btn:disabled{
+        opacity:0.7;
+        cursor:not-allowed;
+      }
+      .vm-import-bar.vm-import-loading .vm-import-btn .vm-import-btn-label{
+        visibility:hidden;
+      }
+      .vm-import-bar.vm-import-loading .vm-import-btn::after{
+        content:'';
+        position:absolute;
+        left:50%;
+        top:50%;
+        width:18px;
+        height:18px;
+        margin:-9px 0 0 -9px;
+        border-radius:50%;
+        border:2px solid rgba(61,92,72,0.2);
+        border-top-color:var(--accent-sage);
+        animation:vmSpin 0.75s linear infinite;
       }
 
       .brand{
@@ -462,16 +532,33 @@
       })();
     </script>
     <header>
-      <div class="brand">VideoMind</div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <a
-          id="loginBtn"
-          href="/login.html"
-          class="btn"
-          style="text-decoration:none;display:none;align-items:center;"
-          >登录</a
-        >
-        <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
+      <div class="site-header-row">
+        <div class="brand">VideoMind</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <a
+            id="loginBtn"
+            href="/login.html"
+            class="btn"
+            style="text-decoration:none;display:none;align-items:center;"
+            >登录</a
+          >
+          <button id="notifyBtn" class="btn" type="button">开启手机提醒</button>
+        </div>
+      </div>
+      <div class="vm-import-bar" id="vmImportBar">
+        <input
+          id="importUrlInput"
+          type="text"
+          inputmode="url"
+          autocomplete="off"
+          autocapitalize="none"
+          spellcheck="false"
+          placeholder="粘贴 YouTube 视频链接"
+          aria-label="粘贴或输入视频链接"
+        />
+        <button type="button" class="vm-import-btn" id="importBtn" aria-busy="false">
+          <span class="vm-import-btn-label">导入</span>
+        </button>
       </div>
     </header>
 
@@ -516,6 +603,9 @@
       const searchInput = document.getElementById('searchInput');
       const categoryTagsEl = document.getElementById('categoryTags');
       const modalRoot = document.getElementById('vmModalRoot');
+      const importUrlInput = document.getElementById('importUrlInput');
+      const importBtn = document.getElementById('importBtn');
+      const vmImportBar = document.getElementById('vmImportBar');
 
       let selectedCategory = 'all';
 
@@ -922,6 +1012,49 @@
         return filtered;
       }
 
+      function runShareTaskPolling(taskId, options) {
+        options = options || {};
+        const cleanQuery = options.cleanQuery !== false;
+        const overlay = document.getElementById('vmShareOverlay');
+        if (!overlay || !taskId) return;
+        overlay.style.display = 'flex';
+        let stopped = false;
+
+        function cleanup() {
+          overlay.style.display = 'none';
+          stopped = true;
+          if (cleanQuery) {
+            try {
+              const qs = new URLSearchParams(window.location.search);
+              if (qs.has('share_task_id')) {
+                qs.delete('share_task_id');
+                const next = window.location.pathname + (qs.toString() ? '?' + qs.toString() : '');
+                window.history.replaceState({}, '', next);
+              }
+            } catch (e) {}
+          }
+        }
+
+        async function poll() {
+          if (stopped) return;
+          try {
+            const r = await apiFetch('/api/tasks/' + encodeURIComponent(taskId) + '?_=' + Date.now());
+            if (r.ok) {
+              const it = await r.json();
+              if (it && it.status && it.status !== 'pending') {
+                cleanup();
+                await refreshHistory();
+                if (it.status === 'error') toast('导入失败：' + (it.error_message || '请稍后重试'));
+                return;
+              }
+            }
+          } catch (e) {}
+          setTimeout(poll, 1800);
+        }
+
+        poll();
+      }
+
       function renderCardList(filtered) {
         historyEl.innerHTML = '';
         emptyEl.style.display = filtered.length ? 'none' : '';
@@ -1102,45 +1235,118 @@
         }, ms);
       }
 
-      // 分享导入：带 share_task_id 时展示 Loading，并轮询任务完成后刷新列表
-      (function handleShareImport() {
-        const overlay = document.getElementById('vmShareOverlay');
-        if (!overlay) return;
+      function normalizeImportUrl(s) {
+        let t = (s || '').trim();
+        if (!t) return '';
+        t = t.replace(/\s+/g, '');
+        if (/^https?:\/\//i.test(t)) return t;
+        if (/^(www\.|m\.)?youtube\.com/i.test(t) || /^youtu\.be/i.test(t)) return 'https://' + t.replace(/^\/+/, '');
+        return t;
+      }
+
+      async function tryFillImportFromClipboard() {
+        if (!importUrlInput || importUrlInput.value.trim()) return;
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return;
+          const t = (await navigator.clipboard.readText()).trim();
+          if (!t) return;
+          if (/youtube\.com|youtu\.be|^https?:\/\//i.test(t)) importUrlInput.value = t;
+        } catch (e) {}
+      }
+
+      async function submitImportFromBar() {
+        if (!importUrlInput || !importBtn || !vmImportBar) return;
+        const raw = importUrlInput.value.trim();
+        if (!raw) {
+          toast('请先粘贴或输入视频链接');
+          return;
+        }
+        const norm = normalizeImportUrl(raw);
+        const params = new URLSearchParams();
+        if (norm && /^https?:\/\//i.test(norm)) params.set('url', norm);
+        else params.set('text', raw);
+
+        const sharePath = '/api/share-target?' + params.toString();
+        const ph = importUrlInput.placeholder;
+        vmImportBar.classList.add('vm-import-loading');
+        importBtn.setAttribute('aria-busy', 'true');
+        importUrlInput.disabled = true;
+        importBtn.disabled = true;
+        importUrlInput.placeholder = '导入中…';
+
+        try {
+          const headers = Object.assign({ 'Cache-Control': 'no-cache' }, vmAuthHeaders());
+          const r = await fetch(sharePath, {
+            method: 'GET',
+            credentials: 'include',
+            redirect: 'manual',
+            cache: 'no-store',
+            headers
+          });
+
+          if (r.type === 'opaqueredirect' || r.status === 0) {
+            window.location.href = sharePath;
+            return;
+          }
+
+          if (r.status >= 300 && r.status < 400) {
+            const loc = r.headers.get('Location');
+            if (!loc) {
+              window.location.href = sharePath;
+              return;
+            }
+            const abs = new URL(loc, window.location.origin);
+            if (abs.pathname.endsWith('/login.html') || abs.pathname.includes('/login.html')) {
+              window.location.href = abs.href;
+              return;
+            }
+            if (abs.searchParams.get('share_error') === 'missing_url') {
+              toast('无法识别有效链接，请粘贴完整 YouTube 地址');
+              return;
+            }
+            const tid = abs.searchParams.get('share_task_id');
+            if (tid) {
+              importUrlInput.value = '';
+              runShareTaskPolling(tid, { cleanQuery: false });
+              return;
+            }
+            window.location.href = abs.href;
+            return;
+          }
+
+          toast('导入失败，请重试');
+        } catch (e) {
+          toast('导入失败：' + String(e));
+        } finally {
+          vmImportBar.classList.remove('vm-import-loading');
+          importBtn.setAttribute('aria-busy', 'false');
+          importUrlInput.disabled = false;
+          importBtn.disabled = false;
+          importUrlInput.placeholder = ph;
+        }
+      }
+
+      if (importUrlInput) {
+        importUrlInput.addEventListener('focus', () => {
+          tryFillImportFromClipboard();
+        });
+        importUrlInput.addEventListener('click', () => {
+          tryFillImportFromClipboard();
+        });
+        importUrlInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submitImportFromBar();
+          }
+        });
+      }
+      if (importBtn) importBtn.addEventListener('click', () => submitImportFromBar());
+
+      // 分享导入：URL 带 share_task_id 时展示 Loading，并轮询任务完成后刷新列表
+      (function bootShareTaskFromQuery() {
         const qs = new URLSearchParams(window.location.search);
         const taskId = qs.get('share_task_id');
-        if (!taskId) return;
-
-        overlay.style.display = 'flex';
-        let stopped = false;
-
-        function cleanup() {
-          overlay.style.display = 'none';
-          stopped = true;
-          try {
-            qs.delete('share_task_id');
-            const next = window.location.pathname + (qs.toString() ? '?' + qs.toString() : '');
-            window.history.replaceState({}, '', next);
-          } catch (e) {}
-        }
-
-        async function poll() {
-          if (stopped) return;
-          try {
-            const r = await apiFetch('/api/tasks/' + encodeURIComponent(taskId) + '?_=' + Date.now());
-            if (r.ok) {
-              const it = await r.json();
-              if (it && it.status && it.status !== 'pending') {
-                cleanup();
-                await refreshHistory();
-                if (it.status === 'error') toast('导入失败：' + (it.error_message || '请稍后重试'));
-                return;
-              }
-            }
-          } catch (e) {}
-          setTimeout(poll, 1800);
-        }
-
-        poll();
+        if (taskId) runShareTaskPolling(taskId, { cleanQuery: true });
       })();
       refreshHistory()
         .then(() => {
