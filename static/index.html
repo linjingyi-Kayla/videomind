@@ -208,6 +208,20 @@
         font-weight:600;
       }
 
+      .vm-clip-detect-preview{
+        margin-top:10px;
+        padding:10px 12px;
+        border-radius:12px;
+        background:#f6f6f6;
+        border:1px solid var(--line);
+        font-size:12px;
+        color:var(--muted);
+        word-break:break-all;
+        max-height:4.5em;
+        overflow:hidden;
+        line-height:1.35;
+      }
+
       .brand{
         font-family:"Playfair Display","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
         font-weight:700;
@@ -634,7 +648,7 @@
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
-          placeholder="点「选项」从剪贴板粘贴，或手动输入链接"
+          placeholder="从 YouTube 复制链接后回到本页，或点「选项」粘贴"
           aria-label="粘贴或输入视频链接"
         />
         <button type="button" class="vm-import-menu-btn" id="importMenuBtn" aria-label="导入选项" title="导入选项">
@@ -1329,6 +1343,164 @@
         return t;
       }
 
+      function simpleHash(str) {
+        let h = 0;
+        const s = String(str);
+        for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+        return 'x' + (h >>> 0).toString(16);
+      }
+
+      function clipDismissStorageKey(url) {
+        return 'vm_clip_dis_' + simpleHash(url);
+      }
+
+      function isClipUrlDismissed(url) {
+        try {
+          return sessionStorage.getItem(clipDismissStorageKey(url)) === '1';
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function dismissClipUrlForSession(url) {
+        try {
+          sessionStorage.setItem(clipDismissStorageKey(url), '1');
+        } catch (e) {}
+      }
+
+      function youtubeUrlFromText(text) {
+        if (!text || typeof text !== 'string') return null;
+        const s = text.trim();
+        if (!s) return null;
+        const norm = normalizeImportUrl(s);
+        if (norm && /^https?:\/\//i.test(norm) && /youtube\.com|youtu\.be/i.test(norm)) return norm;
+        const m = s.match(/https?:\/\/[^\s<>"'()]+/i);
+        if (m) {
+          let u = m[0].replace(/[.,;)\]}>'"\]]+$/g, '');
+          if (/youtube\.com|youtu\.be/i.test(u)) {
+            const n2 = normalizeImportUrl(u);
+            return n2 && /^https?:\/\//i.test(n2) ? n2 : u;
+          }
+        }
+        return null;
+      }
+
+      let vmClipAutoBusy = false;
+      let vmClipNextScanEarliest = 0;
+
+      async function scanClipboardForAutoImport() {
+        if (!modalRoot) return;
+        if (document.getElementById('vm-clip-detect-modal')) return;
+        if (document.getElementById('vm-import-sheet-root')) return;
+        const now = Date.now();
+        if (now < vmClipNextScanEarliest) return;
+        vmClipNextScanEarliest = now + 2800;
+
+        if (vmClipAutoBusy) return;
+        try {
+          if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
+        } catch (e) {
+          return;
+        }
+
+        vmClipAutoBusy = true;
+        try {
+          const text = (await navigator.clipboard.readText()).trim();
+          const url = youtubeUrlFromText(text);
+          if (!url) return;
+          if (isClipUrlDismissed(url)) return;
+          showClipboardDetectedModal(url);
+        } catch (e) {
+          /* iOS：无用户手势或拒绝权限时静默失败 */
+        } finally {
+          vmClipAutoBusy = false;
+        }
+      }
+
+      function closeClipboardDetectModal() {
+        if (window.__vm_clip_detect_keydown) {
+          document.removeEventListener('keydown', window.__vm_clip_detect_keydown);
+          window.__vm_clip_detect_keydown = null;
+        }
+        const el = document.getElementById('vm-clip-detect-modal');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+
+      function showClipboardDetectedModal(url) {
+        closeImportOptionsSheet();
+        closeClipboardDetectModal();
+        if (!modalRoot) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'vm-clip-detect-modal';
+        overlay.className = 'vm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'vm-clip-detect-title');
+
+        const box = document.createElement('div');
+        box.className = 'vm-modal';
+        box.addEventListener('click', (e) => e.stopPropagation());
+
+        const h = document.createElement('h3');
+        h.id = 'vm-clip-detect-title';
+        h.textContent = '检测到剪贴板链接';
+
+        const p = document.createElement('p');
+        p.textContent = '识别为 YouTube 视频链接，是否立即导入？';
+
+        const prev = document.createElement('div');
+        prev.className = 'vm-clip-detect-preview';
+        prev.textContent = url;
+
+        const actions = document.createElement('div');
+        actions.className = 'vm-actions';
+        actions.style.marginTop = '14px';
+
+        const bYes = document.createElement('button');
+        bYes.type = 'button';
+        bYes.className = 'vm-btn-primary';
+        bYes.textContent = '立即导入';
+        bYes.addEventListener('click', () => {
+          closeClipboardDetectModal();
+          runShareTargetImportRaw(url).catch(() => {});
+        });
+
+        const bNo = document.createElement('button');
+        bNo.type = 'button';
+        bNo.className = 'vm-btn-ghost';
+        bNo.textContent = '暂不';
+        bNo.addEventListener('click', () => {
+          dismissClipUrlForSession(url);
+          closeClipboardDetectModal();
+        });
+
+        actions.appendChild(bNo);
+        actions.appendChild(bYes);
+        box.appendChild(h);
+        box.appendChild(p);
+        box.appendChild(prev);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            dismissClipUrlForSession(url);
+            closeClipboardDetectModal();
+          }
+        });
+
+        function onKey(ev) {
+          if (ev.key === 'Escape') {
+            dismissClipUrlForSession(url);
+            closeClipboardDetectModal();
+          }
+        }
+        window.__vm_clip_detect_keydown = onKey;
+        document.addEventListener('keydown', onKey);
+        modalRoot.appendChild(overlay);
+      }
+
       async function readClipboardIntoInput() {
         if (!importUrlInput) return false;
         try {
@@ -1381,7 +1553,7 @@
         const hint = document.createElement('p');
         hint.className = 'vm-import-sheet-hint';
         hint.textContent =
-          'iPhone / Safari 不允许在「点输入框」时静默读剪贴板。请点下方按钮授权粘贴，或在输入框里长按选择「粘贴」。';
+          '复制链接后切回 VideoMind，我们会尽量自动弹出导入确认；也可点「从剪贴板粘贴」或在输入框长按粘贴。';
 
         const actions = document.createElement('div');
         actions.className = 'vm-import-sheet-actions';
@@ -1436,9 +1608,9 @@
         modalRoot.appendChild(overlay);
       }
 
-      async function submitImportFromBar() {
+      async function runShareTargetImportRaw(raw) {
         if (!importUrlInput || !importBtn || !vmImportBar) return;
-        const raw = importUrlInput.value.trim();
+        raw = String(raw || '').trim();
         if (!raw) {
           toast('请先粘贴或输入视频链接');
           return;
@@ -1490,6 +1662,9 @@
             const tid = abs.searchParams.get('share_task_id');
             if (tid) {
               importUrlInput.value = '';
+              const dismissU =
+                youtubeUrlFromText(raw) || (norm && /youtube\.com|youtu\.be/i.test(norm) ? norm : '');
+              if (dismissU) dismissClipUrlForSession(dismissU);
               runShareTaskPolling(tid, { cleanQuery: false });
               return;
             }
@@ -1508,6 +1683,11 @@
           if (importMenuBtn) importMenuBtn.disabled = false;
           importUrlInput.placeholder = ph;
         }
+      }
+
+      async function submitImportFromBar() {
+        if (!importUrlInput) return;
+        await runShareTargetImportRaw(importUrlInput.value);
       }
 
       if (importUrlInput) {
@@ -1535,7 +1715,21 @@
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
           refreshHistory().catch(() => {});
+          setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 400);
         }
+      });
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          scanClipboardForAutoImport().catch(() => {});
+        },
+        { capture: true, passive: true }
+      );
+      window.addEventListener('pageshow', () => {
+        setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 400);
+      });
+      window.addEventListener('focus', () => {
+        setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 300);
       });
     </script>
   </body>
