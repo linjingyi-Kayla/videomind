@@ -112,6 +112,21 @@
         return u.get(name);
       }
 
+      function normalizeNext(raw) {
+        if (!raw) return '/';
+        const v = String(raw).trim();
+        // 允许 /path?query 形式
+        if (v.startsWith('/')) return v;
+        // 允许完整 URL，但必须同源（分享重定向会用绝对 URL 作为 next）
+        try {
+          const u = new URL(v, window.location.origin);
+          if (u.origin !== window.location.origin) return '/';
+          return u.pathname + u.search + u.hash;
+        } catch (e) {
+          return '/';
+        }
+      }
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         errEl.style.display = 'none';
@@ -123,6 +138,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
             body: JSON.stringify({ email, password }),
+            credentials: 'include',
             cache: 'no-store'
           });
           const data = await resp.json().catch(() => ({}));
@@ -135,8 +151,8 @@
             vmSetToken(data.access_token);
             vmSetUserEmail(email);
           }
-          const next = qs('next');
-          window.location.href = next && next.startsWith('/') ? next : '/';
+          const next = normalizeNext(qs('next'));
+          window.location.href = next;
         } catch (e) {
           errEl.style.display = '';
           errEl.textContent = String(e);

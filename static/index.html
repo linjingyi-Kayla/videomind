@@ -351,6 +351,52 @@
         border:1px solid var(--line);
       }
 
+      /* 分享导入 Loading */
+      .vm-share-overlay{
+        position:fixed;
+        inset:0;
+        z-index:100002;
+        display:none;
+        align-items:center;
+        justify-content:center;
+        padding:18px;
+        background:rgba(255,255,255,0.55);
+        backdrop-filter:saturate(1.2) blur(12px);
+        -webkit-backdrop-filter:saturate(1.2) blur(12px);
+      }
+      .vm-share-box{
+        width:100%;
+        max-width:420px;
+        background:rgba(255,255,255,0.92);
+        border:1px solid var(--line);
+        border-radius:18px;
+        padding:22px 18px;
+        box-shadow:0 16px 48px rgba(0,0,0,0.12);
+        text-align:center;
+      }
+      .vm-spinner{
+        width:54px;
+        height:54px;
+        margin:0 auto 12px;
+        border-radius:50%;
+        border:4px solid rgba(0,0,0,0.08);
+        border-top-color: rgba(45,92,72,0.85);
+        animation: vmSpin 0.9s linear infinite;
+      }
+      @keyframes vmSpin { to { transform: rotate(360deg); } }
+      .vm-share-title{
+        font-weight:900;
+        font-size:16px;
+        margin:0 0 8px;
+        letter-spacing:0.01em;
+      }
+      .vm-share-sub{
+        margin:0;
+        color:var(--muted);
+        font-size:13px;
+        line-height:1.45;
+      }
+
       .bottom-nav{
         position:fixed;
         left:0;
@@ -440,6 +486,13 @@
       <div id="empty" class="empty" style="display:none;">暂无任务</div>
     </div>
     <div id="vmModalRoot" aria-live="polite"></div>
+  <div id="vmShareOverlay" class="vm-share-overlay" aria-live="polite">
+    <div class="vm-share-box" role="status" aria-label="正在导入">
+      <div class="vm-spinner" aria-hidden="true"></div>
+      <div class="vm-share-title">正在分析并保存视频…</div>
+      <p class="vm-share-sub">请稍候，完成后会自动刷新列表。</p>
+    </div>
+  </div>
 
     <nav class="bottom-nav" aria-label="主导航">
       <a href="/" class="active">
@@ -1048,6 +1101,47 @@
             });
         }, ms);
       }
+
+      // 分享导入：带 share_task_id 时展示 Loading，并轮询任务完成后刷新列表
+      (function handleShareImport() {
+        const overlay = document.getElementById('vmShareOverlay');
+        if (!overlay) return;
+        const qs = new URLSearchParams(window.location.search);
+        const taskId = qs.get('share_task_id');
+        if (!taskId) return;
+
+        overlay.style.display = 'flex';
+        let stopped = false;
+
+        function cleanup() {
+          overlay.style.display = 'none';
+          stopped = true;
+          try {
+            qs.delete('share_task_id');
+            const next = window.location.pathname + (qs.toString() ? '?' + qs.toString() : '');
+            window.history.replaceState({}, '', next);
+          } catch (e) {}
+        }
+
+        async function poll() {
+          if (stopped) return;
+          try {
+            const r = await apiFetch('/api/tasks/' + encodeURIComponent(taskId) + '?_=' + Date.now());
+            if (r.ok) {
+              const it = await r.json();
+              if (it && it.status && it.status !== 'pending') {
+                cleanup();
+                await refreshHistory();
+                if (it.status === 'error') toast('导入失败：' + (it.error_message || '请稍后重试'));
+                return;
+              }
+            }
+          } catch (e) {}
+          setTimeout(poll, 1800);
+        }
+
+        poll();
+      })();
       refreshHistory()
         .then(() => {
           scheduleHistoryPoll();

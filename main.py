@@ -7,14 +7,16 @@ import logging
 import os
 import secrets
 import uuid
+import re
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
@@ -73,6 +75,40 @@ def _html_response(path: Path) -> FileResponse:
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+def _extract_first_url(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = re.search(r"https?://\S+", text)
+    if not m:
+        return None
+    u = m.group(0).strip().rstrip(").,;\"'")
+    return u or None
+
+
+def _resolve_shared_video_url(url: Optional[str], text: Optional[str]) -> Optional[str]:
+    u = (url or "").strip()
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    t = (text or "").strip()
+    if t:
+        cand = _extract_first_url(t)
+        if cand and (cand.startswith("http://") or cand.startswith("https://")):
+            return cand
+    return None
+
+
+def _try_get_user_from_request(req: Request, db: Session) -> Optional[User]:
+    auth_h = req.headers.get("authorization") or ""
+    token: Optional[str] = None
+    if auth_h.lower().startswith("bearer "):
+        token = auth_h.split(" ", 1)[1].strip()
+    if not token:
+        token = (req.cookies.get("vm_access_token") or "").strip() or None
+    if not token:
+        return None
+    return get_user_by_token(db, token)
 
 
 class PushSubscriptionIn(BaseModel):
@@ -145,7 +181,6 @@ class TokenResponse(BaseModel):
 class MeResponse(BaseModel):
     id: int
     email: str
-    share_token: str
 
 
 def get_db():
@@ -158,11 +193,16 @@ def get_db():
 
 def get_current_user(
     authorization: Optional[str] = Header(None),
+    vm_access_token: Optional[str] = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> User:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="未登录或缺少 Authorization: Bearer Token")
-    token = authorization.split(" ", 1)[1].strip()
+    token: Optional[str] = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    if not token and vm_access_token:
+        token = vm_access_token.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="未登录：缺少 Token")
     user = get_user_by_token(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="登录已过期或 Token 无效")
@@ -521,9 +561,8 @@ async def manifest_json() -> FileResponse:
             "icons": [],
             "share_target": {
                 "action": "/api/share-target",
-                "method": "POST",
-                "enctype": "multipart/form-data",
-                "params": {"url": "url", "share_token": "text"},
+                "method": "GET",
+                "params": {"title": "title", "text": "text", "url": "url"},
             },
         }
     )
@@ -570,24 +609,34 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> JSONRespon
 
 
 @app.post("/api/login", response_model=TokenResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
     email = str(body.email).lower().strip()
     user = db.execute(select(User).where(User.email == email)).scalars().first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
-    return TokenResponse(access_token=create_access_token(user.id))
+    token = create_access_token(user.id)
+    # 用 HttpOnly Cookie 承载登录态，便于 iOS 系统分享（GET share_target）自动携带
+    response.set_cookie(
+        key="vm_access_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=bool(os.getenv("COOKIE_SECURE", "").strip() == "1"),
+        path="/",
+        max_age=60 * 60 * 24 * 14,
+    )
+    return TokenResponse(access_token=token)
 
 
 @app.get("/api/me", response_model=MeResponse)
-def me(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> MeResponse:
-    u = db.get(User, current_user.id)
-    if u is None:
-        raise HTTPException(status_code=401, detail="用户不存在")
-    if not u.share_token:
-        u.share_token = secrets.token_hex(16)
-        db.commit()
-        db.refresh(u)
-    return MeResponse(id=u.id, email=u.email, share_token=u.share_token or "")
+def me(current_user: User = Depends(get_current_user)) -> MeResponse:
+    return MeResponse(id=current_user.id, email=current_user.email)
+
+
+@app.post("/api/logout")
+def logout(response: Response) -> JSONResponse:
+    response.delete_cookie("vm_access_token", path="/")
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/subscribe", response_model=SubscribeResponse)
@@ -862,6 +911,43 @@ async def share_target(request: Request, background: BackgroundTasks) -> JSONRes
     req = SummarizeRequest(url=url)  # type: ignore[arg-type]
     resp = _summarize_for_user(user.id, req, background)
     return JSONResponse(resp.model_dump())
+
+
+@app.get("/api/share-target", include_in_schema=False)
+async def share_target_get(
+    request: Request,
+    background: BackgroundTasks,
+    title: Optional[str] = None,
+    text: Optional[str] = None,
+    url: Optional[str] = None,
+) -> RedirectResponse:
+    """
+    Web Share Target GET 入口（iOS 系统分享菜单会以 query params 传入 title/text/url）。
+
+    - 若已登录（Cookie 或 Authorization）：后台创建任务并 Redirect 回主页 `/?share_task_id=...`
+    - 若未登录：Redirect 到 `/login.html?next=<当前分享 URL>`，登录成功后再回到此接口继续创建任务
+    """
+    video_url = _resolve_shared_video_url(url, text)
+    if not video_url:
+        return RedirectResponse(url="/?share_error=missing_url", status_code=302)
+
+    db = new_session()
+    try:
+        user = _try_get_user_from_request(request, db)
+    finally:
+        db.close()
+
+    if not user:
+        next_url = str(request.url)
+        # next 作为 query 参数值只需要编码一次；过度编码会导致登录页无法解析完整 URL
+        return RedirectResponse(
+            url="/login.html?next=" + quote(next_url, safe="/:?&=%#[]@!$'()*+,;="),
+            status_code=302,
+        )
+
+    req = SummarizeRequest(url=video_url)  # type: ignore[arg-type]
+    resp = _summarize_for_user(user.id, req, background)
+    return RedirectResponse(url="/?share_task_id=" + quote(resp.task_id), status_code=302)
 
 
 @app.on_event("startup")

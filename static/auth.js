@@ -21,6 +21,9 @@ function vmSetUserEmail(email) {
 
 /** 退出登录：清除 Token 与本地缓存的邮箱 */
 function vmLogout() {
+  try {
+    fetch('/api/logout', { method: 'POST', credentials: 'include', cache: 'no-store' }).catch(function () {});
+  } catch (e) {}
   vmSetToken(null);
   vmSetUserEmail(null);
 }
@@ -38,7 +41,8 @@ function vmAuthHeaders() {
 function apiFetch(url, opts) {
   opts = opts || {};
   const headers = Object.assign({}, vmAuthHeaders(), opts.headers || {});
-  return fetch(url, Object.assign({}, opts, { headers })).then(function (resp) {
+  const nextOpts = Object.assign({ credentials: 'include' }, opts, { headers });
+  return fetch(url, nextOpts).then(function (resp) {
     if (resp.status === 401 && !location.pathname.endsWith('/login.html')) {
       var next = encodeURIComponent(location.pathname + location.search);
       location.href = '/login.html?next=' + next;
