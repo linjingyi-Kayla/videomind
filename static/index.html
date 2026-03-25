@@ -222,6 +222,56 @@
         line-height:1.35;
       }
 
+      .vm-clip-hint-host:empty{
+        display:none;
+      }
+      .vm-clip-hint-host{
+        padding:0 12px 8px;
+        max-width:1200px;
+        margin:0 auto;
+        width:100%;
+        box-sizing:border-box;
+      }
+      .vm-clip-hint-banner{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+        padding:10px 12px;
+        border-radius:12px;
+        background:rgba(61,92,72,0.14);
+        border:1px solid rgba(61,92,72,0.28);
+        font-size:13px;
+        line-height:1.4;
+        color:#2a3d32;
+      }
+      .vm-clip-hint-banner .vm-clip-hint-msg{
+        flex:1;
+        min-width:140px;
+      }
+      .vm-clip-hint-banner button.vm-clip-hint-action{
+        flex-shrink:0;
+        border:0;
+        border-radius:10px;
+        padding:8px 14px;
+        font-weight:800;
+        font-size:13px;
+        background:var(--accent-sage);
+        color:#fff;
+        cursor:pointer;
+      }
+      .vm-clip-hint-banner button.vm-clip-hint-close{
+        flex-shrink:0;
+        border:0;
+        background:transparent;
+        color:var(--muted);
+        font-size:20px;
+        line-height:1;
+        padding:2px 6px;
+        cursor:pointer;
+        margin-left:auto;
+      }
+
       .brand{
         font-family:"Playfair Display","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
         font-weight:700;
@@ -648,7 +698,7 @@
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
-          placeholder="从 YouTube 复制链接后回到本页，或点「选项」粘贴"
+          placeholder="复制链接后点上方绿条「检测剪贴板」，或在此长按粘贴"
           aria-label="粘贴或输入视频链接"
         />
         <button type="button" class="vm-import-menu-btn" id="importMenuBtn" aria-label="导入选项" title="导入选项">
@@ -659,6 +709,8 @@
         </button>
       </div>
     </header>
+
+    <div id="vmClipHintHost" class="vm-clip-hint-host" aria-live="polite"></div>
 
     <div class="content">
       <div class="toolbar">
@@ -1385,35 +1437,110 @@
         return null;
       }
 
-      let vmClipAutoBusy = false;
       let vmClipNextScanEarliest = 0;
+      let vmClipBannerCooldownUntil = 0;
 
-      async function scanClipboardForAutoImport() {
+      function hideClipboardHintBanner() {
+        const host = document.getElementById('vmClipHintHost');
+        if (host) host.innerHTML = '';
+      }
+
+      function showClipboardHintBanner() {
+        const host = document.getElementById('vmClipHintHost');
+        if (!host || document.getElementById('vm-clip-hint-banner')) return;
+
+        const bar = document.createElement('div');
+        bar.id = 'vm-clip-hint-banner';
+        bar.className = 'vm-clip-hint-banner';
+
+        const msg = document.createElement('div');
+        msg.className = 'vm-clip-hint-msg';
+        msg.textContent =
+          '若在其它 App 复制了 YouTube 链接：系统要求先点一下。点右侧「检测剪贴板」可自动读出链接并弹出导入确认，无需再手动粘贴。';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vm-clip-hint-action';
+        btn.textContent = '检测剪贴板';
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          startClipboardReadFromUserGesture();
+        });
+
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'vm-clip-hint-close';
+        close.setAttribute('aria-label', '关闭提示');
+        close.textContent = '×';
+        close.addEventListener('click', (e) => {
+          e.preventDefault();
+          hideClipboardHintBanner();
+        });
+
+        bar.appendChild(msg);
+        bar.appendChild(btn);
+        bar.appendChild(close);
+        host.appendChild(bar);
+      }
+
+      function maybeShowClipboardHintBanner(force) {
+        const now = Date.now();
+        if (!force && now < vmClipBannerCooldownUntil) return;
+        if (!force) vmClipBannerCooldownUntil = now + 22000;
+        showClipboardHintBanner();
+      }
+
+      function shouldSkipClipboardScanOnPointer(ev) {
+        const n = ev.target;
+        if (!(n instanceof Element)) return false;
+        if (n.closest('#vm-clip-hint-banner, #vm-clip-detect-modal, #vm-import-sheet-root')) return true;
+        if (n.closest('#importBtn, #importMenuBtn, #notifyBtn, #loginBtn')) return true;
+        if (n.closest('input, textarea, select, button')) return true;
+        if (n.closest('a[href]')) return true;
+        return false;
+      }
+
+      /**
+       * 必须在「真实用户手势」里同步发起 readText（不要用 async 包一层再 await），否则 iOS Safari / PWA 会拒绝。
+       */
+      function startClipboardReadFromUserGesture() {
         if (!modalRoot) return;
         if (document.getElementById('vm-clip-detect-modal')) return;
         if (document.getElementById('vm-import-sheet-root')) return;
         const now = Date.now();
         if (now < vmClipNextScanEarliest) return;
-        vmClipNextScanEarliest = now + 2800;
+        vmClipNextScanEarliest = now + 1600;
 
-        if (vmClipAutoBusy) return;
+        let readable = false;
         try {
-          if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') return;
+          readable = !!(navigator.clipboard && typeof navigator.clipboard.readText === 'function');
         } catch (e) {
+          readable = false;
+        }
+        if (!readable) {
+          toast('当前环境不支持读取剪贴板，请长按输入框粘贴');
           return;
         }
 
-        vmClipAutoBusy = true;
         try {
-          const text = (await navigator.clipboard.readText()).trim();
-          const url = youtubeUrlFromText(text);
-          if (!url) return;
-          if (isClipUrlDismissed(url)) return;
-          showClipboardDetectedModal(url);
+          navigator.clipboard
+            .readText()
+            .then((text) => {
+              const url = youtubeUrlFromText(String(text || '').trim());
+              if (!url) {
+                toast('剪贴板里没有可识别的 YouTube 链接');
+                return;
+              }
+              if (isClipUrlDismissed(url)) return;
+              hideClipboardHintBanner();
+              showClipboardDetectedModal(url);
+            })
+            .catch(() => {
+              toast('未能读取剪贴板，请点绿条「检测剪贴板」或长按输入框粘贴');
+            });
         } catch (e) {
-          /* iOS：无用户手势或拒绝权限时静默失败 */
-        } finally {
-          vmClipAutoBusy = false;
+          toast('未能读取剪贴板');
         }
       }
 
@@ -1553,7 +1680,7 @@
         const hint = document.createElement('p');
         hint.className = 'vm-import-sheet-hint';
         hint.textContent =
-          '复制链接后切回 VideoMind，我们会尽量自动弹出导入确认；也可点「从剪贴板粘贴」或在输入框长按粘贴。';
+          '从 YouTube 返回后请先看页面上的绿色提示条，点「检测剪贴板」；也可在此手动粘贴。';
 
         const actions = document.createElement('div');
         actions.className = 'vm-import-sheet-actions';
@@ -1715,21 +1842,22 @@
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
           refreshHistory().catch(() => {});
-          setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 400);
+          maybeShowClipboardHintBanner(false);
         }
       });
       window.addEventListener(
         'pointerdown',
-        () => {
-          scanClipboardForAutoImport().catch(() => {});
+        (ev) => {
+          if (shouldSkipClipboardScanOnPointer(ev)) return;
+          startClipboardReadFromUserGesture();
         },
         { capture: true, passive: true }
       );
       window.addEventListener('pageshow', () => {
-        setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 400);
+        maybeShowClipboardHintBanner(false);
       });
       window.addEventListener('focus', () => {
-        setTimeout(() => scanClipboardForAutoImport().catch(() => {}), 300);
+        maybeShowClipboardHintBanner(false);
       });
     </script>
   </body>
