@@ -127,6 +127,87 @@
         animation:vmSpin 0.75s linear infinite;
       }
 
+      .vm-import-menu-btn{
+        flex-shrink:0;
+        min-width:44px;
+        padding:10px 12px;
+        border-radius:12px;
+        border:1px solid rgba(0,0,0,0.1);
+        background:rgba(255,255,255,0.78);
+        color:#444;
+        font-weight:800;
+        font-size:16px;
+        line-height:1;
+        cursor:pointer;
+        box-shadow:0 1px 2px rgba(0,0,0,0.04);
+      }
+      .vm-import-menu-btn:disabled{
+        opacity:0.65;
+        cursor:not-allowed;
+      }
+
+      /* 导入选项底部弹层（显式点击读剪贴板，兼容 iOS） */
+      .vm-import-sheet-overlay{
+        position:fixed;
+        inset:0;
+        z-index:100001;
+        background:rgba(0,0,0,0.38);
+        display:flex;
+        align-items:flex-end;
+        justify-content:center;
+        padding:0;
+      }
+      .vm-import-sheet{
+        width:100%;
+        max-width:520px;
+        background:#fff;
+        border-radius:18px 18px 0 0;
+        padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+        box-shadow:0 -8px 32px rgba(0,0,0,0.12);
+        border:1px solid var(--line);
+        border-bottom:0;
+      }
+      .vm-import-sheet h3{
+        margin:0 0 6px;
+        font-size:17px;
+        font-weight:800;
+      }
+      .vm-import-sheet .vm-import-sheet-hint{
+        margin:0 0 14px;
+        font-size:13px;
+        color:var(--muted);
+        line-height:1.45;
+      }
+      .vm-import-sheet-actions{
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+      .vm-import-sheet-actions button{
+        width:100%;
+        border-radius:12px;
+        padding:14px 16px;
+        font-weight:700;
+        font-size:15px;
+        cursor:pointer;
+        border:1px solid var(--line);
+      }
+      .vm-import-sheet-actions .vm-sheet-primary{
+        background:var(--accent-sage);
+        color:#fff;
+        border-color:rgba(61,92,72,0.35);
+      }
+      .vm-import-sheet-actions .vm-sheet-secondary{
+        background:rgba(255,255,255,0.92);
+        color:var(--text);
+      }
+      .vm-import-sheet-actions .vm-sheet-ghost{
+        background:transparent;
+        color:var(--muted);
+        border-color:transparent;
+        font-weight:600;
+      }
+
       .brand{
         font-family:"Playfair Display","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
         font-weight:700;
@@ -553,9 +634,12 @@
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
-          placeholder="粘贴 YouTube 视频链接"
+          placeholder="点「选项」从剪贴板粘贴，或手动输入链接"
           aria-label="粘贴或输入视频链接"
         />
+        <button type="button" class="vm-import-menu-btn" id="importMenuBtn" aria-label="导入选项" title="导入选项">
+          ···
+        </button>
         <button type="button" class="vm-import-btn" id="importBtn" aria-busy="false">
           <span class="vm-import-btn-label">导入</span>
         </button>
@@ -605,6 +689,7 @@
       const modalRoot = document.getElementById('vmModalRoot');
       const importUrlInput = document.getElementById('importUrlInput');
       const importBtn = document.getElementById('importBtn');
+      const importMenuBtn = document.getElementById('importMenuBtn');
       const vmImportBar = document.getElementById('vmImportBar');
 
       let selectedCategory = 'all';
@@ -1244,14 +1329,111 @@
         return t;
       }
 
-      async function tryFillImportFromClipboard() {
-        if (!importUrlInput || importUrlInput.value.trim()) return;
+      async function readClipboardIntoInput() {
+        if (!importUrlInput) return false;
         try {
-          if (!navigator.clipboard || !navigator.clipboard.readText) return;
+          if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
+            toast('当前页面无法自动读剪贴板，请长按输入框选择「粘贴」');
+            return false;
+          }
           const t = (await navigator.clipboard.readText()).trim();
-          if (!t) return;
-          if (/youtube\.com|youtu\.be|^https?:\/\//i.test(t)) importUrlInput.value = t;
-        } catch (e) {}
+          if (!t) {
+            toast('剪贴板里没有内容');
+            return false;
+          }
+          importUrlInput.value = t;
+          toast('已从剪贴板填入');
+          return true;
+        } catch (e) {
+          toast('读取剪贴板失败（需在你点击后授权）：请长按输入框手动粘贴，或检查系统/浏览器剪贴板权限');
+          return false;
+        }
+      }
+
+      function closeImportOptionsSheet() {
+        if (window.__vm_import_sheet_keydown) {
+          document.removeEventListener('keydown', window.__vm_import_sheet_keydown);
+          window.__vm_import_sheet_keydown = null;
+        }
+        const el = document.getElementById('vm-import-sheet-root');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+
+      function openImportOptionsSheet() {
+        if (!modalRoot) return;
+        closeImportOptionsSheet();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'vm-import-sheet-root';
+        overlay.className = 'vm-import-sheet-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'vm-import-sheet-title');
+
+        const sheet = document.createElement('div');
+        sheet.className = 'vm-import-sheet';
+        sheet.addEventListener('click', (e) => e.stopPropagation());
+
+        const h = document.createElement('h3');
+        h.id = 'vm-import-sheet-title';
+        h.textContent = '导入视频';
+
+        const hint = document.createElement('p');
+        hint.className = 'vm-import-sheet-hint';
+        hint.textContent =
+          'iPhone / Safari 不允许在「点输入框」时静默读剪贴板。请点下方按钮授权粘贴，或在输入框里长按选择「粘贴」。';
+
+        const actions = document.createElement('div');
+        actions.className = 'vm-import-sheet-actions';
+
+        const bClip = document.createElement('button');
+        bClip.type = 'button';
+        bClip.className = 'vm-sheet-primary';
+        bClip.textContent = '从剪贴板粘贴链接';
+        bClip.addEventListener('click', async () => {
+          bClip.disabled = true;
+          try {
+            const ok = await readClipboardIntoInput();
+            if (ok) closeImportOptionsSheet();
+          } finally {
+            bClip.disabled = false;
+          }
+        });
+
+        const bManual = document.createElement('button');
+        bManual.type = 'button';
+        bManual.className = 'vm-sheet-secondary';
+        bManual.textContent = '手动输入或长按粘贴';
+        bManual.addEventListener('click', () => {
+          closeImportOptionsSheet();
+          if (importUrlInput) {
+            importUrlInput.focus();
+            try {
+              importUrlInput.setSelectionRange(importUrlInput.value.length, importUrlInput.value.length);
+            } catch (e) {}
+          }
+        });
+
+        const bCancel = document.createElement('button');
+        bCancel.type = 'button';
+        bCancel.className = 'vm-sheet-ghost';
+        bCancel.textContent = '取消';
+        bCancel.addEventListener('click', () => closeImportOptionsSheet());
+
+        actions.appendChild(bClip);
+        actions.appendChild(bManual);
+        actions.appendChild(bCancel);
+        sheet.appendChild(h);
+        sheet.appendChild(hint);
+        sheet.appendChild(actions);
+        overlay.appendChild(sheet);
+        overlay.addEventListener('click', () => closeImportOptionsSheet());
+        function onKey(ev) {
+          if (ev.key === 'Escape') closeImportOptionsSheet();
+        }
+        window.__vm_import_sheet_keydown = onKey;
+        document.addEventListener('keydown', onKey);
+        modalRoot.appendChild(overlay);
       }
 
       async function submitImportFromBar() {
@@ -1272,6 +1454,7 @@
         importBtn.setAttribute('aria-busy', 'true');
         importUrlInput.disabled = true;
         importBtn.disabled = true;
+        if (importMenuBtn) importMenuBtn.disabled = true;
         importUrlInput.placeholder = '导入中…';
 
         try {
@@ -1322,17 +1505,12 @@
           importBtn.setAttribute('aria-busy', 'false');
           importUrlInput.disabled = false;
           importBtn.disabled = false;
+          if (importMenuBtn) importMenuBtn.disabled = false;
           importUrlInput.placeholder = ph;
         }
       }
 
       if (importUrlInput) {
-        importUrlInput.addEventListener('focus', () => {
-          tryFillImportFromClipboard();
-        });
-        importUrlInput.addEventListener('click', () => {
-          tryFillImportFromClipboard();
-        });
         importUrlInput.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -1340,6 +1518,7 @@
           }
         });
       }
+      if (importMenuBtn) importMenuBtn.addEventListener('click', () => openImportOptionsSheet());
       if (importBtn) importBtn.addEventListener('click', () => submitImportFromBar());
 
       // 分享导入：URL 带 share_task_id 时展示 Loading，并轮询任务完成后刷新列表
