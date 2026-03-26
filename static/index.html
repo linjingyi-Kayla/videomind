@@ -208,20 +208,6 @@
         font-weight:600;
       }
 
-      .vm-clip-detect-preview{
-        margin-top:10px;
-        padding:10px 12px;
-        border-radius:12px;
-        background:#f6f6f6;
-        border:1px solid var(--line);
-        font-size:12px;
-        color:var(--muted);
-        word-break:break-all;
-        max-height:4.5em;
-        overflow:hidden;
-        line-height:1.35;
-      }
-
       .vm-clip-hint-host:empty{
         display:none;
       }
@@ -698,7 +684,7 @@
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
-          placeholder="复制链接后点上方绿条「检测剪贴板」，或在此长按粘贴"
+          placeholder="在 YouTube 复制后回到本页：点绿条一键导入，或在此长按粘贴（自动导入）"
           aria-label="粘贴或输入视频链接"
         />
         <button type="button" class="vm-import-menu-btn" id="importMenuBtn" aria-label="导入选项" title="导入选项">
@@ -1439,6 +1425,20 @@
 
       let vmClipNextScanEarliest = 0;
       let vmClipBannerCooldownUntil = 0;
+      let vmImportRequestLock = false;
+      let vmLastImportDedupeKey = '';
+      let vmLastImportDedupeAt = 0;
+      let vmPasteImportTimer = null;
+
+      function canonicalImportDedupeKey(raw) {
+        const s = String(raw || '').trim();
+        if (!s) return '';
+        const y = youtubeUrlFromText(s);
+        if (y) return 'y|' + y;
+        const n = normalizeImportUrl(s);
+        if (n && /^https?:\/\//i.test(n) && /youtube\.com|youtu\.be/i.test(n)) return 'n|' + n;
+        return 'h|' + simpleHash(s.slice(0, 800));
+      }
 
       function hideClipboardHintBanner() {
         const host = document.getElementById('vmClipHintHost');
@@ -1456,12 +1456,12 @@
         const msg = document.createElement('div');
         msg.className = 'vm-clip-hint-msg';
         msg.textContent =
-          '若在其它 App 复制了 YouTube 链接：系统要求先点一下。点右侧「检测剪贴板」可自动读出链接并弹出导入确认，无需再手动粘贴。';
+          'iPhone 不允许在「刚切回 App」时静默读剪贴板；点右侧一次即可完成读取并导入。或在下方输入框长按粘贴，也会自动开始导入。';
 
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'vm-clip-hint-action';
-        btn.textContent = '检测剪贴板';
+        btn.textContent = '一键读取并导入';
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1491,23 +1491,17 @@
         showClipboardHintBanner();
       }
 
-      function shouldSkipClipboardScanOnPointer(ev) {
-        const n = ev.target;
-        if (!(n instanceof Element)) return false;
-        if (n.closest('#vm-clip-hint-banner, #vm-clip-detect-modal, #vm-import-sheet-root')) return true;
-        if (n.closest('#importBtn, #importMenuBtn, #notifyBtn, #loginBtn')) return true;
-        if (n.closest('input, textarea, select, button')) return true;
-        if (n.closest('a[href]')) return true;
-        return false;
-      }
-
       /**
        * 必须在「真实用户手势」里同步发起 readText（不要用 async 包一层再 await），否则 iOS Safari / PWA 会拒绝。
+       * 读到 YouTube 链接后直接导入（不再二次弹窗），避免连点导致重复任务。
        */
       function startClipboardReadFromUserGesture() {
         if (!modalRoot) return;
-        if (document.getElementById('vm-clip-detect-modal')) return;
         if (document.getElementById('vm-import-sheet-root')) return;
+        if (vmImportRequestLock) {
+          toast('已有导入在进行，请稍候');
+          return;
+        }
         const now = Date.now();
         if (now < vmClipNextScanEarliest) return;
         vmClipNextScanEarliest = now + 1600;
@@ -1534,98 +1528,14 @@
               }
               if (isClipUrlDismissed(url)) return;
               hideClipboardHintBanner();
-              showClipboardDetectedModal(url);
+              runShareTargetImportRaw(url).catch(() => {});
             })
             .catch(() => {
-              toast('未能读取剪贴板，请点绿条「检测剪贴板」或长按输入框粘贴');
+              toast('未能读取剪贴板，请点绿条「一键读取并导入」或长按输入框粘贴');
             });
         } catch (e) {
           toast('未能读取剪贴板');
         }
-      }
-
-      function closeClipboardDetectModal() {
-        if (window.__vm_clip_detect_keydown) {
-          document.removeEventListener('keydown', window.__vm_clip_detect_keydown);
-          window.__vm_clip_detect_keydown = null;
-        }
-        const el = document.getElementById('vm-clip-detect-modal');
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-      }
-
-      function showClipboardDetectedModal(url) {
-        closeImportOptionsSheet();
-        closeClipboardDetectModal();
-        if (!modalRoot) return;
-
-        const overlay = document.createElement('div');
-        overlay.id = 'vm-clip-detect-modal';
-        overlay.className = 'vm-modal-overlay';
-        overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-modal', 'true');
-        overlay.setAttribute('aria-labelledby', 'vm-clip-detect-title');
-
-        const box = document.createElement('div');
-        box.className = 'vm-modal';
-        box.addEventListener('click', (e) => e.stopPropagation());
-
-        const h = document.createElement('h3');
-        h.id = 'vm-clip-detect-title';
-        h.textContent = '检测到剪贴板链接';
-
-        const p = document.createElement('p');
-        p.textContent = '识别为 YouTube 视频链接，是否立即导入？';
-
-        const prev = document.createElement('div');
-        prev.className = 'vm-clip-detect-preview';
-        prev.textContent = url;
-
-        const actions = document.createElement('div');
-        actions.className = 'vm-actions';
-        actions.style.marginTop = '14px';
-
-        const bYes = document.createElement('button');
-        bYes.type = 'button';
-        bYes.className = 'vm-btn-primary';
-        bYes.textContent = '立即导入';
-        bYes.addEventListener('click', () => {
-          closeClipboardDetectModal();
-          runShareTargetImportRaw(url).catch(() => {});
-        });
-
-        const bNo = document.createElement('button');
-        bNo.type = 'button';
-        bNo.className = 'vm-btn-ghost';
-        bNo.textContent = '暂不';
-        bNo.addEventListener('click', () => {
-          dismissClipUrlForSession(url);
-          closeClipboardDetectModal();
-        });
-
-        actions.appendChild(bNo);
-        actions.appendChild(bYes);
-        box.appendChild(h);
-        box.appendChild(p);
-        box.appendChild(prev);
-        box.appendChild(actions);
-        overlay.appendChild(box);
-
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) {
-            dismissClipUrlForSession(url);
-            closeClipboardDetectModal();
-          }
-        });
-
-        function onKey(ev) {
-          if (ev.key === 'Escape') {
-            dismissClipUrlForSession(url);
-            closeClipboardDetectModal();
-          }
-        }
-        window.__vm_clip_detect_keydown = onKey;
-        document.addEventListener('keydown', onKey);
-        modalRoot.appendChild(overlay);
       }
 
       async function readClipboardIntoInput() {
@@ -1680,7 +1590,7 @@
         const hint = document.createElement('p');
         hint.className = 'vm-import-sheet-hint';
         hint.textContent =
-          '从 YouTube 返回后请先看页面上的绿色提示条，点「检测剪贴板」；也可在此手动粘贴。';
+          '从 YouTube 返回后看绿色提示条，点「一键读取并导入」；也可在此粘贴到输入框。';
 
         const actions = document.createElement('div');
         actions.className = 'vm-import-sheet-actions';
@@ -1737,11 +1647,30 @@
 
       async function runShareTargetImportRaw(raw) {
         if (!importUrlInput || !importBtn || !vmImportBar) return;
+
+        if (vmImportRequestLock) {
+          toast('已有导入在进行，请稍候');
+          return;
+        }
+
         raw = String(raw || '').trim();
         if (!raw) {
           toast('请先粘贴或输入视频链接');
           return;
         }
+
+        const dedupeKey = canonicalImportDedupeKey(raw);
+        const now0 = Date.now();
+        if (
+          dedupeKey &&
+          dedupeKey === vmLastImportDedupeKey &&
+          now0 - vmLastImportDedupeAt < 20000
+        ) {
+          toast('该链接刚导入过，已跳过重复请求');
+          return;
+        }
+
+        vmImportRequestLock = true;
         const norm = normalizeImportUrl(raw);
         const params = new URLSearchParams();
         if (norm && /^https?:\/\//i.test(norm)) params.set('url', norm);
@@ -1767,6 +1696,8 @@
           });
 
           if (r.type === 'opaqueredirect' || r.status === 0) {
+            vmLastImportDedupeKey = dedupeKey;
+            vmLastImportDedupeAt = Date.now();
             window.location.href = sharePath;
             return;
           }
@@ -1774,6 +1705,8 @@
           if (r.status >= 300 && r.status < 400) {
             const loc = r.headers.get('Location');
             if (!loc) {
+              vmLastImportDedupeKey = dedupeKey;
+              vmLastImportDedupeAt = Date.now();
               window.location.href = sharePath;
               return;
             }
@@ -1789,6 +1722,8 @@
             const tid = abs.searchParams.get('share_task_id');
             if (tid) {
               importUrlInput.value = '';
+              vmLastImportDedupeKey = dedupeKey;
+              vmLastImportDedupeAt = Date.now();
               const dismissU =
                 youtubeUrlFromText(raw) || (norm && /youtube\.com|youtu\.be/i.test(norm) ? norm : '');
               if (dismissU) dismissClipUrlForSession(dismissU);
@@ -1803,6 +1738,7 @@
         } catch (e) {
           toast('导入失败：' + String(e));
         } finally {
+          vmImportRequestLock = false;
           vmImportBar.classList.remove('vm-import-loading');
           importBtn.setAttribute('aria-busy', 'false');
           importUrlInput.disabled = false;
@@ -1818,6 +1754,17 @@
       }
 
       if (importUrlInput) {
+        importUrlInput.addEventListener('paste', (e) => {
+          const pasted = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+          if (vmPasteImportTimer) clearTimeout(vmPasteImportTimer);
+          vmPasteImportTimer = setTimeout(() => {
+            vmPasteImportTimer = null;
+            const raw = (importUrlInput.value || '').trim() || String(pasted).trim();
+            if (!raw) return;
+            if (!youtubeUrlFromText(raw) && !/youtube\.com|youtu\.be/i.test(raw)) return;
+            runShareTargetImportRaw(raw).catch(() => {});
+          }, 120);
+        });
         importUrlInput.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -1845,14 +1792,6 @@
           maybeShowClipboardHintBanner(false);
         }
       });
-      window.addEventListener(
-        'pointerdown',
-        (ev) => {
-          if (shouldSkipClipboardScanOnPointer(ev)) return;
-          startClipboardReadFromUserGesture();
-        },
-        { capture: true, passive: true }
-      );
       window.addEventListener('pageshow', () => {
         maybeShowClipboardHintBanner(false);
       });
