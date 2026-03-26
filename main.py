@@ -27,7 +27,7 @@ from videomind.ai_service import analyze_video
 from videomind.auth import create_access_token, get_user_by_token, hash_password, verify_password
 from videomind.db import init_db, new_session
 from videomind.db_models import Subscription, Task, User
-from videomind.extractor import extract_video_text
+from videomind.extractor import _extract_youtube_video_id, extract_video_text
 from videomind.webpush import send_web_push
 
 load_dotenv(override=False)
@@ -97,6 +97,50 @@ def _resolve_shared_video_url(url: Optional[str], text: Optional[str]) -> Option
         if cand and (cand.startswith("http://") or cand.startswith("https://")):
             return cand
     return None
+
+
+def _youtube_id_from_url_safe(video_url: Optional[str]) -> Optional[str]:
+    if not video_url:
+        return None
+    try:
+        return _extract_youtube_video_id(video_url)
+    except Exception:
+        return None
+
+
+def _dedupe_task_for_youtube(user_id: int, video_url: str) -> Optional[Task]:
+    """
+    兜底去重：避免同一用户在短时间内因前端重复触发而产生两条任务。
+    只要 YouTube video_id 相同，就复用最近的 pending/done 任务。
+    """
+    session = new_session()
+    try:
+        target_id = _youtube_id_from_url_safe(video_url)
+        if not target_id:
+            return None
+
+        cutoff = (datetime.utcnow() - timedelta(minutes=30)).replace(tzinfo=None)
+        candidates = (
+            session.execute(
+                select(Task)
+                .where(
+                    Task.user_id == user_id,
+                    Task.status.in_(["pending", "done"]),
+                    Task.created_at >= cutoff,
+                )
+                .order_by(desc(Task.created_at))
+                .limit(30)
+            )
+            .scalars()
+            .all()
+        )
+        for t in candidates:
+            tid = _youtube_id_from_url_safe(getattr(t, "video_url", None))
+            if tid == target_id:
+                return t
+        return None
+    finally:
+        session.close()
 
 
 def _try_get_user_from_request(req: Request, db: Session) -> Optional[User]:
@@ -908,6 +952,10 @@ async def share_target(request: Request, background: BackgroundTasks) -> JSONRes
     finally:
         session.close()
 
+    existing = _dedupe_task_for_youtube(user.id, url)  # type: ignore[arg-type]
+    if existing:
+        return JSONResponse({"task_id": existing.task_uuid, "status": existing.status})
+
     req = SummarizeRequest(url=url)  # type: ignore[arg-type]
     resp = _summarize_for_user(user.id, req, background)
     return JSONResponse(resp.model_dump())
@@ -944,6 +992,11 @@ async def share_target_get(
             url="/login.html?next=" + quote(next_url, safe="/:?&=%#[]@!$'()*+,;="),
             status_code=302,
         )
+
+    # 去重：避免同一用户同一 YouTube 视频在短时间内触发两条任务
+    existing = _dedupe_task_for_youtube(user.id, video_url)
+    if existing:
+        return RedirectResponse(url="/?share_task_id=" + quote(existing.task_uuid), status_code=302)
 
     req = SummarizeRequest(url=video_url)  # type: ignore[arg-type]
     resp = _summarize_for_user(user.id, req, background)
