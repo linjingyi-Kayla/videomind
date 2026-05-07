@@ -11,8 +11,9 @@ import re
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
+import requests
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -372,6 +373,25 @@ def _extract_youtube_title_with_ytdlp(url: str) -> Optional[str]:
     return None
 
 
+def _extract_youtube_title_with_oembed(url: str) -> Optional[str]:
+    """
+    兜底：YouTube oEmbed 公开接口拿标题（不需要 API key）。
+    当 yt-dlp 在某些网络环境失败时，尽量避免标题退化为“总结首句”。
+    """
+    try:
+        query = urlencode({"url": url, "format": "json"})
+        resp = requests.get(f"https://www.youtube.com/oembed?{query}", timeout=12)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        title = data.get("title") if isinstance(data, dict) else None
+        if title:
+            return str(title).strip() or None
+    except Exception:
+        return None
+    return None
+
+
 def _friendly_push_body(t: Task) -> str:
     """温和有趣的到期提醒文案（与视频标题绑定，避免千篇一律）。"""
     title = (t.title or "这条视频").strip()
@@ -416,10 +436,12 @@ async def _process_task(task_uuid: str) -> None:
         # 与 DB 一致，避免下游只读到旧 webpage_url
         extracted["webpage_url"] = task.video_url
 
-        # YouTube：始终并行拉 yt-dlp 标题（RapidAPI 有时无 title），再与抽取结果合并
+        # YouTube：并行拉标题（yt-dlp + oEmbed），尽量避免标题退化为总结首句
         title_future = None
+        oembed_title_future = None
         if _is_youtube_url(task.video_url):
             title_future = asyncio.to_thread(_extract_youtube_title_with_ytdlp, task.video_url)
+            oembed_title_future = asyncio.to_thread(_extract_youtube_title_with_oembed, task.video_url)
 
         extracted_title = extracted.get("title")
         if isinstance(extracted_title, str):
@@ -441,9 +463,13 @@ async def _process_task(task_uuid: str) -> None:
                 _tz_ai = None
         remind_at_dt = _calc_next_remind_datetime(ai.remind_at, _tz_ai)
         yt_title: Optional[str] = None
+        oembed_title: Optional[str] = None
         if title_future:
             yt_title = await title_future
-        merged = (extracted_title or yt_title or "").strip()
+        if oembed_title_future:
+            oembed_title = await oembed_title_future
+        # 标题优先级：yt-dlp > oEmbed > extractor，最后才回退总结首句
+        merged = (yt_title or oembed_title or extracted_title or "").strip()
         if not merged:
             merged = (_fallback_title_from_summary(summary) or "").strip()
         task.title = merged if merged else "未命名视频"

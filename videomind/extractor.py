@@ -102,6 +102,7 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
     )
     host = os.getenv("RAPIDAPI_HOST", "youtube-transcript3.p.rapidapi.com")
     headers = {
+        "Content-Type": "application/json",
         "X-RapidAPI-Key": rapid_api_key,
         "X-RapidAPI-Host": host,
         # 降低代理/CDN 返回「上一次请求」字幕的概率
@@ -109,10 +110,10 @@ def _extract_youtube_transcript_text(url: str) -> Dict[str, Any]:
         "Pragma": "no-cache",
     }
 
-    # 先用 video_id 拉取；部分服务端字段名可能略有不同，这里做轻量兜底
+    # 官方文档参数名优先使用 videoId；保留其余字段作兼容兜底
     params_list = [
-        {"video_id": video_id},
         {"videoId": video_id},
+        {"video_id": video_id},
         {"id": video_id},
         {"url": url},
     ]
