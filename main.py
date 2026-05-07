@@ -112,7 +112,7 @@ def _youtube_id_from_url_safe(video_url: Optional[str]) -> Optional[str]:
 def _dedupe_task_for_youtube(user_id: int, video_url: str) -> Optional[Task]:
     """
     兜底去重：避免同一用户在短时间内因前端重复触发而产生两条任务。
-    只要 YouTube video_id 相同，就复用最近的 pending/done 任务。
+    只去重“仍在处理中的 pending 任务”；已完成(done)任务允许再次导入生成新卡片。
     """
     session = new_session()
     try:
@@ -126,7 +126,7 @@ def _dedupe_task_for_youtube(user_id: int, video_url: str) -> Optional[Task]:
                 select(Task)
                 .where(
                     Task.user_id == user_id,
-                    Task.status.in_(["pending", "done"]),
+                    Task.status == "pending",
                     Task.created_at >= cutoff,
                 )
                 .order_by(desc(Task.created_at))
