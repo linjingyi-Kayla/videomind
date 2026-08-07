@@ -6,9 +6,10 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
-# Local env / secrets
+# Local env / secrets（切勿把真实 Key 提交进仓库）
 .env
 .env.*
+!.env.example
 
 # Local SQLite DB (dev)
 data/
