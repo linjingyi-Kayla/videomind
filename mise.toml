@@ -1,0 +1,3 @@
+[settings]
+# Railway Railpack/mise：GitHub attestation 偶发不可用会导致 python@3.12.8 安装失败
+python.github_attestations = false
