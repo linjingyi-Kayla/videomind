@@ -233,9 +233,35 @@
         border-bottom-left-radius: 4px;
       }
       .chat-bubble.assistant a.ts-link {
-        color: #2d5c48;
+        color: #0b57d0;
         font-weight: 700;
         text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+      }
+      .chat-bubble.assistant a.ts-link:hover {
+        color: #0842a0;
+      }
+      .chat-bubble.loading {
+        color: #888;
+        font-style: italic;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .chat-bubble.loading .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #ccc;
+        border-top-color: #3d5c48;
+        border-radius: 50%;
+        animation: chat-spin 0.7s linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes chat-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
       .chat-empty {
         text-align: center;
@@ -414,15 +440,46 @@
           .replace(/"/g, '&quot;');
       }
 
-      /** 将助手回复中的 [mm:ss] 转为可点击 YouTube 跳转链接 */
+      /** 将助手回复中的时间戳转为可点击 YouTube 跳转链接 */
       function linkifyTimestamps(text, videoUrl) {
         const esc = escapeHtml(text || '');
-        return esc.replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, function (_m, ts) {
-          const sec = mmssToSeconds(ts);
-          if (sec == null) return '[' + ts + ']';
-          const href = escapeHtml(youtubeTimeUrl(videoUrl, sec));
-          return '<a class="ts-link" href="' + href + '" target="_blank" rel="noopener">[' + ts + ']</a>';
-        });
+        // 兼容 [mm:ss] / ［mm:ss］ / 【mm:ss】 / (mm:ss) / （mm:ss），以及全角冒号
+        return esc.replace(
+          /[\[［【(（]\s*(\d{1,2})\s*[:：]\s*(\d{2})(?:\s*[:：]\s*(\d{2}))?\s*[\]］】)）]/g,
+          function (_m, a, b, c) {
+            const parts = c != null ? [a, b, c] : [a, b];
+            const ts = parts.join(':');
+            const sec = mmssToSeconds(ts);
+            if (sec == null) return _m;
+            const href = escapeHtml(youtubeTimeUrl(videoUrl, sec));
+            return (
+              '<a class="ts-link" href="' +
+              href +
+              '" target="_blank" rel="noopener noreferrer">[' +
+              ts +
+              ']</a>'
+            );
+          }
+        );
+      }
+
+      function showChatLoading() {
+        const empty = chatMessages.querySelector('.chat-empty');
+        if (empty) empty.remove();
+        let el = document.getElementById('chatLoading');
+        if (el) el.remove();
+        el = document.createElement('div');
+        el.id = 'chatLoading';
+        el.className = 'chat-bubble assistant loading';
+        el.setAttribute('aria-live', 'polite');
+        el.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>思考中…</span>';
+        chatMessages.appendChild(el);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      function hideChatLoading() {
+        const el = document.getElementById('chatLoading');
+        if (el) el.remove();
       }
 
       const id = qs('id');
@@ -581,9 +638,11 @@
         }
         chatBusy = true;
         chatSend.disabled = true;
+        chatSend.textContent = '思考中';
         chatInput.disabled = true;
         appendChatBubble('user', text);
         chatInput.value = '';
+        showChatLoading();
         try {
           const r = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '/chat', {
             method: 'POST',
@@ -592,6 +651,7 @@
             cache: 'no-store',
           });
           const data = await r.json().catch(() => ({}));
+          hideChatLoading();
           if (!r.ok) {
             const detail = data.detail || '发送失败';
             appendChatBubble(
@@ -605,10 +665,12 @@
             appendChatBubble('assistant', data.assistant.content);
           }
         } catch (e) {
+          hideChatLoading();
           appendChatBubble('assistant', '（失败）' + String(e));
         } finally {
           chatBusy = false;
           chatSend.disabled = false;
+          chatSend.textContent = '发送';
           chatInput.disabled = false;
           chatInput.focus();
         }
