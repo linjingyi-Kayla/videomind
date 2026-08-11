@@ -76,6 +76,22 @@ class Task(Base):
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     annotation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # 带时间戳字幕文本（供详情页 Chat 上下文）；格式多为 "[mm:ss] ..."
+    subtitles_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChatMessage(Base):
+    """详情页「问视频」多轮对话，按 task 持久化。"""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_uuid: Mapped[str] = mapped_column(String, ForeignKey("tasks.task_uuid"), index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

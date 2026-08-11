@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import create_engine, inspect, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .db_models import Base, User  # noqa: F401 — User 需载入以注册 metadata
+from .db_models import Base, ChatMessage, User  # noqa: F401 — 需载入以注册 metadata
 
 
 def _db_path() -> str:
@@ -175,6 +175,11 @@ def _ensure_task_columns(engine) -> None:
                 conn.execute(text("ALTER TABLE tasks ADD COLUMN annotation TEXT"))
             else:
                 conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS annotation TEXT"))
+        if "subtitles_text" not in cols:
+            if dialect == "sqlite":
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN subtitles_text TEXT"))
+            else:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS subtitles_text TEXT"))
 
 
 def init_db() -> None:

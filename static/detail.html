@@ -133,22 +133,146 @@
         background: #2c2c2c;
         color: #fff;
       }
+      .btn-chat {
+        background: #3d5c48;
+        color: #fff;
+      }
       .err {
         color: #b42318;
         padding: 16px;
       }
       .detail-bar {
+        display: none;
+      }
+
+      /* 问视频抽屉 */
+      .chat-overlay {
+        display: none;
         position: fixed;
+        inset: 0;
+        z-index: 200;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .chat-overlay.open {
+        display: block;
+      }
+      .chat-drawer {
+        position: absolute;
         left: 0;
         right: 0;
-        bottom: calc(52px + env(safe-area-inset-bottom));
-        z-index: 70;
+        bottom: 0;
+        max-height: min(78dvh, 640px);
         display: flex;
-        justify-content: center;
-        gap: 12px;
-        padding: 10px 14px;
+        flex-direction: column;
         background: #fff;
+        border-radius: 16px 16px 0 0;
         border-top: 1px solid var(--line);
+        box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.12);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .chat-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--line);
+        flex-shrink: 0;
+      }
+      .chat-head h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 800;
+      }
+      .chat-close {
+        border: 0;
+        background: transparent;
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+        color: #666;
+        padding: 4px 8px;
+      }
+      .chat-hint {
+        margin: 0;
+        padding: 8px 16px;
+        font-size: 12px;
+        color: var(--muted);
+        background: #f7f7f7;
+        border-bottom: 1px solid var(--line);
+        flex-shrink: 0;
+      }
+      .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 160px;
+      }
+      .chat-bubble {
+        max-width: 92%;
+        padding: 10px 12px;
+        border-radius: 14px;
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .chat-bubble.user {
+        align-self: flex-end;
+        background: #3d5c48;
+        color: #fff;
+        border-bottom-right-radius: 4px;
+      }
+      .chat-bubble.assistant {
+        align-self: flex-start;
+        background: #f2f2f2;
+        color: var(--text);
+        border-bottom-left-radius: 4px;
+      }
+      .chat-bubble.assistant a.ts-link {
+        color: #2d5c48;
+        font-weight: 700;
+        text-decoration: underline;
+      }
+      .chat-empty {
+        text-align: center;
+        color: #999;
+        font-size: 13px;
+        padding: 24px 12px;
+      }
+      .chat-compose {
+        display: flex;
+        gap: 8px;
+        padding: 10px 12px 12px;
+        border-top: 1px solid var(--line);
+        flex-shrink: 0;
+        background: #fff;
+      }
+      .chat-compose input {
+        flex: 1;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 15px;
+        outline: none;
+        background: #fafafa;
+      }
+      .chat-compose button {
+        flex-shrink: 0;
+        border: 0;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 700;
+        background: #3d5c48;
+        color: #fff;
+        cursor: pointer;
+      }
+      .chat-compose button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
       }
       .bottom-nav {
         position: fixed;
@@ -206,6 +330,7 @@
         <ul class="kp" id="kp"></ul>
         <div class="actions">
           <button type="button" class="btn btn-heart" id="btnHeart">♡ 收藏</button>
+          <button type="button" class="btn btn-chat" id="btnChat">问视频</button>
           <a class="btn" id="openYt" href="#" target="_blank" rel="noopener" style="background: rgba(0,0,0,0.08); text-decoration: none; color: inherit; display: inline-flex; align-items: center;">在 YouTube 打开</a>
         </div>
         <div class="note-label">我的批注</div>
@@ -214,7 +339,20 @@
       </div>
     </div>
 
-    <div class="detail-bar" id="detailBar" style="display: none"></div>
+    <div class="chat-overlay" id="chatOverlay" aria-hidden="true">
+      <div class="chat-drawer" role="dialog" aria-labelledby="chatTitle">
+        <div class="chat-head">
+          <h2 id="chatTitle">问视频</h2>
+          <button type="button" class="chat-close" id="chatClose" aria-label="关闭">×</button>
+        </div>
+        <p class="chat-hint" id="chatHint">基于本视频字幕与总结回答；回答中的 [mm:ss] 可点击跳转。</p>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-compose">
+          <input id="chatInput" type="text" placeholder="问一句关于这个视频的问题…" autocomplete="off" />
+          <button type="button" id="chatSend">发送</button>
+        </div>
+      </div>
+    </div>
 
     <nav class="bottom-nav" aria-label="主导航">
       <a href="/">
@@ -252,12 +390,54 @@
         }
       }
 
+      function mmssToSeconds(mmss) {
+        const parts = String(mmss || '')
+          .split(':')
+          .map((x) => parseInt(x, 10));
+        if (parts.some((n) => isNaN(n))) return null;
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return null;
+      }
+
+      function youtubeTimeUrl(videoUrl, seconds) {
+        const vid = extractYouTubeId(videoUrl || '');
+        if (!vid || seconds == null || seconds < 0) return videoUrl || '#';
+        return 'https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '&t=' + Math.floor(seconds) + 's';
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      /** 将助手回复中的 [mm:ss] 转为可点击 YouTube 跳转链接 */
+      function linkifyTimestamps(text, videoUrl) {
+        const esc = escapeHtml(text || '');
+        return esc.replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, function (_m, ts) {
+          const sec = mmssToSeconds(ts);
+          if (sec == null) return '[' + ts + ']';
+          const href = escapeHtml(youtubeTimeUrl(videoUrl, sec));
+          return '<a class="ts-link" href="' + href + '" target="_blank" rel="noopener">[' + ts + ']</a>';
+        });
+      }
+
       const id = qs('id');
       const errEl = document.getElementById('err');
       const content = document.getElementById('content');
+      const chatOverlay = document.getElementById('chatOverlay');
+      const chatMessages = document.getElementById('chatMessages');
+      const chatInput = document.getElementById('chatInput');
+      const chatSend = document.getElementById('chatSend');
+      const chatHint = document.getElementById('chatHint');
 
       /** 当前任务（轮询时同步更新，供收藏按钮等使用） */
       let taskState = null;
+      let chatBusy = false;
+      let chatLoaded = false;
 
       function renderTask(it) {
         const vid = extractYouTubeId(it.video_url || '');
@@ -313,6 +493,125 @@
           heart.textContent = taskState.is_favorite ? '♥ 已收藏' : '♡ 收藏';
         }
         syncHeart();
+
+        const btnChat = document.getElementById('btnChat');
+        if (btnChat) {
+          btnChat.disabled = it.status !== 'done';
+          btnChat.title = it.status === 'done' ? '' : '视频处理完成后可提问';
+        }
+      }
+
+      function appendChatBubble(role, content) {
+        const empty = chatMessages.querySelector('.chat-empty');
+        if (empty) empty.remove();
+        const div = document.createElement('div');
+        div.className = 'chat-bubble ' + (role === 'user' ? 'user' : 'assistant');
+        if (role === 'assistant') {
+          div.innerHTML = linkifyTimestamps(content, (taskState && taskState.video_url) || '');
+        } else {
+          div.textContent = content;
+        }
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      function renderChatList(items) {
+        chatMessages.innerHTML = '';
+        if (!items || !items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'chat-empty';
+          empty.textContent = '还没有对话。问一句关于这个视频的内容吧。';
+          chatMessages.appendChild(empty);
+          return;
+        }
+        items.forEach((m) => appendChatBubble(m.role, m.content));
+      }
+
+      function setChatHint(hasSubtitles, status) {
+        if (status && status !== 'done') {
+          chatHint.textContent = '视频仍在处理或失败，暂时无法问答。';
+          return;
+        }
+        if (hasSubtitles) {
+          chatHint.textContent = '基于本视频字幕与总结回答；回答中的 [mm:ss] 可点击跳转 YouTube。';
+        } else {
+          chatHint.textContent =
+            '该视频暂无字幕缓存（旧任务可重新导入）。仍可依据标题/总结提问，但通常无法给出精确时间戳。';
+        }
+      }
+
+      async function loadChatHistory() {
+        const r = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '/chat?_=' + Date.now());
+        if (!r.ok) {
+          const t = await r.text();
+          chatMessages.innerHTML = '<div class="chat-empty">加载对话失败：' + escapeHtml(t) + '</div>';
+          return;
+        }
+        const data = await r.json();
+        setChatHint(!!data.has_subtitles, taskState && taskState.status);
+        renderChatList(data.items || []);
+        chatLoaded = true;
+      }
+
+      function openChat() {
+        if (!taskState || taskState.status !== 'done') {
+          alert('请等视频总结完成后再提问');
+          return;
+        }
+        chatOverlay.classList.add('open');
+        chatOverlay.setAttribute('aria-hidden', 'false');
+        if (!chatLoaded) {
+          loadChatHistory().catch((e) => console.warn(e));
+        }
+        setTimeout(() => chatInput.focus(), 50);
+      }
+
+      function closeChat() {
+        chatOverlay.classList.remove('open');
+        chatOverlay.setAttribute('aria-hidden', 'true');
+      }
+
+      async function sendChat() {
+        if (chatBusy) return;
+        const text = (chatInput.value || '').trim();
+        if (!text) return;
+        if (!taskState || taskState.status !== 'done') {
+          alert('视频未就绪');
+          return;
+        }
+        chatBusy = true;
+        chatSend.disabled = true;
+        chatInput.disabled = true;
+        appendChatBubble('user', text);
+        chatInput.value = '';
+        try {
+          const r = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text }),
+            cache: 'no-store',
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const detail = data.detail || '发送失败';
+            appendChatBubble(
+              'assistant',
+              '（失败）' + (typeof detail === 'string' ? detail : JSON.stringify(detail))
+            );
+            return;
+          }
+          setChatHint(!!data.has_subtitles, taskState.status);
+          if (data.assistant && data.assistant.content) {
+            appendChatBubble('assistant', data.assistant.content);
+          }
+        } catch (e) {
+          appendChatBubble('assistant', '（失败）' + String(e));
+        } finally {
+          chatBusy = false;
+          chatSend.disabled = false;
+          chatInput.disabled = false;
+          chatInput.focus();
+        }
       }
 
       function wireActionsOnce() {
@@ -336,9 +635,9 @@
 
         document.getElementById('btnSave').onclick = async () => {
           const text = document.getElementById('note').value;
-          const r = await fetch('/api/tasks/' + encodeURIComponent(id), {
+          const r = await apiFetch('/api/tasks/' + encodeURIComponent(id), {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ annotation: text }),
             cache: 'no-store',
           });
@@ -348,6 +647,19 @@
             alert('保存失败');
           }
         };
+
+        document.getElementById('btnChat').onclick = () => openChat();
+        document.getElementById('chatClose').onclick = () => closeChat();
+        chatOverlay.addEventListener('click', (e) => {
+          if (e.target === chatOverlay) closeChat();
+        });
+        chatSend.onclick = () => sendChat();
+        chatInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendChat();
+          }
+        });
       }
 
       wireActionsOnce();

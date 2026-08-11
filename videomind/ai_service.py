@@ -203,3 +203,86 @@ def analyze_video(payload: Dict[str, Any]) -> AIResult:
         remind_at=remind_at,
     )
 
+
+def chat_about_video(
+    *,
+    title: Optional[str],
+    summary: Optional[str],
+    subtitles_text: Optional[str],
+    video_url: Optional[str],
+    history: List[Dict[str, str]],
+    user_message: str,
+) -> str:
+    """
+    详情页「问视频」多轮问答。
+    history: [{"role":"user"|"assistant","content":"..."}, ...]（不含本轮 user_message）
+    要求模型在引用位置时使用字幕中的 [mm:ss] 格式，便于前端转成 YouTube &t= 链接。
+    """
+    title_s = (title or "").strip() or "（无标题）"
+    summary_s = (summary or "").strip() or "（无总结）"
+    raw_sub = (subtitles_text or "").strip()
+    no_sub = (
+        not raw_sub
+        or raw_sub in ("该视频暂无可用字幕",)
+        or ("暂无可用字幕" in raw_sub and len(raw_sub) < 40)
+    )
+    sub_for_model = "" if no_sub else raw_sub[:14000]
+    page_url = (video_url or "").strip() or "(未提供)"
+
+    system = (
+        "你是 VideoMind 的中文视频助理。用户正在针对「这一条」YouTube 视频提问。"
+        "你必须只依据下方提供的标题、总结与字幕作答，不要编造未出现的细节。"
+        "若引用视频中的具体位置，请使用字幕里已有的时间戳格式：[mm:ss]（例如 [01:23]），"
+        "可在句子中自然嵌入；不要输出 Markdown 链接或裸 URL。"
+        "若材料不足以回答，请如实说明。"
+        "语言：简体中文；回答简洁、适合手机阅读。"
+    )
+    if no_sub:
+        system += (
+            " 【注意】当前没有可用带时间戳字幕：只能依据标题与总结回答，"
+            "且不要编造精确的 [mm:ss] 时间戳。"
+        )
+
+    context = f"""视频链接：{page_url}
+视频标题：{title_s}
+
+视频总结：
+{summary_s}
+
+字幕（可能含 [mm:ss] 时间戳）：
+{sub_for_model if sub_for_model else "（无可用字幕）"}
+""".strip()
+
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "以下是本视频的参考材料（之后的问答都针对此视频）：\n\n" + context},
+        {
+            "role": "assistant",
+            "content": "好的，我已了解该视频的材料。请提问，我会尽量引用 [mm:ss] 时间点。",
+        },
+    ]
+
+    # 最近若干轮历史
+    trimmed = history[-12:] if history else []
+    for m in trimmed:
+        role = (m.get("role") or "").strip()
+        content = (m.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        messages.append({"role": role, "content": content[:4000]})
+
+    messages.append({"role": "user", "content": user_message.strip()[:2000]})
+
+    cli = _client()
+    resp = cli.chat.completions.create(
+        model=_model_name(),
+        temperature=0.3,
+        max_tokens=900,
+        messages=messages,
+    )
+    out = (resp.choices[0].message.content or "").strip()
+    if not out:
+        raise RuntimeError("模型返回为空")
+    return out
+
+

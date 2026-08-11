@@ -24,10 +24,10 @@ from pydantic import BaseModel, EmailStr, Field, HttpUrl
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from videomind.ai_service import analyze_video
+from videomind.ai_service import analyze_video, chat_about_video
 from videomind.auth import create_access_token, get_user_by_token, hash_password, verify_password
 from videomind.db import init_db, new_session
-from videomind.db_models import Subscription, Task, User
+from videomind.db_models import ChatMessage, Subscription, Task, User
 from videomind.extractor import _extract_youtube_video_id, extract_video_text
 from videomind.webpush import send_web_push
 
@@ -476,6 +476,7 @@ async def _process_task(task_uuid: str) -> None:
         task.category = ai.category
         task.summary = summary
         task.key_points_json = key_points_json
+        task.subtitles_text = extracted.get("subtitles_text") or None
         task.status = "done"
         task.remind_at = remind_at_dt
         task.is_notified = False
@@ -920,6 +921,159 @@ async def patch_task(
         session.commit()
         session.refresh(task)
         return _history_item_from_task(task)
+    finally:
+        session.close()
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+
+
+class ChatHistoryResponse(BaseModel):
+    task_id: str
+    has_subtitles: bool
+    items: List[ChatMessageOut]
+
+
+class ChatPostRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatPostResponse(BaseModel):
+    task_id: str
+    has_subtitles: bool
+    user: ChatMessageOut
+    assistant: ChatMessageOut
+
+
+def _chat_has_subtitles(task: Task) -> bool:
+    raw = (getattr(task, "subtitles_text", None) or "").strip()
+    if not raw:
+        return False
+    if raw in ("该视频暂无可用字幕",):
+        return False
+    if "暂无可用字幕" in raw and len(raw) < 40:
+        return False
+    return True
+
+
+def _chat_message_out(m: ChatMessage) -> ChatMessageOut:
+    role: Literal["user", "assistant"] = "assistant" if m.role == "assistant" else "user"
+    return ChatMessageOut(id=m.id, role=role, content=m.content, created_at=m.created_at)
+
+
+@app.get("/api/tasks/{task_id}/chat", response_model=ChatHistoryResponse)
+def get_task_chat(task_id: str, current_user: User = Depends(get_current_user)) -> ChatHistoryResponse:
+    session = new_session()
+    try:
+        task = (
+            session.execute(
+                select(Task).where(Task.task_uuid == task_id, Task.user_id == current_user.id)
+            )
+            .scalars()
+            .first()
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="task_id 不存在")
+        rows = (
+            session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.task_uuid == task_id, ChatMessage.user_id == current_user.id)
+                .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        return ChatHistoryResponse(
+            task_id=task_id,
+            has_subtitles=_chat_has_subtitles(task),
+            items=[_chat_message_out(m) for m in rows],
+        )
+    finally:
+        session.close()
+
+
+@app.post("/api/tasks/{task_id}/chat", response_model=ChatPostResponse)
+def post_task_chat(
+    task_id: str,
+    body: ChatPostRequest,
+    current_user: User = Depends(get_current_user),
+) -> ChatPostResponse:
+    msg = (body.message or "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    session = new_session()
+    try:
+        task = (
+            session.execute(
+                select(Task).where(Task.task_uuid == task_id, Task.user_id == current_user.id)
+            )
+            .scalars()
+            .first()
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="task_id 不存在")
+        if task.status == "pending":
+            raise HTTPException(status_code=409, detail="视频仍在处理中，请稍后再问")
+        if task.status == "error":
+            raise HTTPException(status_code=400, detail="该视频处理失败，无法问答")
+
+        history_rows = (
+            session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.task_uuid == task_id, ChatMessage.user_id == current_user.id)
+                .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        history = [{"role": m.role, "content": m.content} for m in history_rows[-12:]]
+
+        user_row = ChatMessage(
+            task_uuid=task_id,
+            user_id=current_user.id,
+            role="user",
+            content=msg,
+            created_at=_now_utc().replace(tzinfo=None),
+        )
+        session.add(user_row)
+        session.commit()
+        session.refresh(user_row)
+
+        try:
+            answer = chat_about_video(
+                title=task.title,
+                summary=task.summary,
+                subtitles_text=getattr(task, "subtitles_text", None),
+                video_url=task.video_url,
+                history=history,
+                user_message=msg,
+            )
+        except Exception as e:
+            # 模型失败时保留用户消息，便于重试
+            raise HTTPException(status_code=502, detail=f"问答失败：{e}") from e
+
+        asst_row = ChatMessage(
+            task_uuid=task_id,
+            user_id=current_user.id,
+            role="assistant",
+            content=answer,
+            created_at=_now_utc().replace(tzinfo=None),
+        )
+        session.add(asst_row)
+        session.commit()
+        session.refresh(asst_row)
+
+        return ChatPostResponse(
+            task_id=task_id,
+            has_subtitles=_chat_has_subtitles(task),
+            user=_chat_message_out(user_row),
+            assistant=_chat_message_out(asst_row),
+        )
     finally:
         session.close()
 
