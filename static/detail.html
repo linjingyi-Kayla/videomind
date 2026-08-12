@@ -238,8 +238,11 @@
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;
+        pointer-events: auto;
+        -webkit-tap-highlight-color: rgba(11, 87, 208, 0.25);
       }
-      .chat-bubble.assistant a.ts-link:hover {
+      .chat-bubble.assistant a.ts-link:hover,
+      .chat-bubble.assistant a.ts-link:visited {
         color: #0842a0;
       }
       .chat-bubble.loading {
@@ -418,18 +421,28 @@
 
       function mmssToSeconds(mmss) {
         const parts = String(mmss || '')
+          .replace(/：/g, ':')
           .split(':')
           .map((x) => parseInt(x, 10));
-        if (parts.some((n) => isNaN(n))) return null;
+        if (!parts.length || parts.some((n) => isNaN(n))) return null;
         if (parts.length === 2) return parts[0] * 60 + parts[1];
         if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
         return null;
       }
 
+      function resolveYoutubeId(videoUrl) {
+        let vid = extractYouTubeId(videoUrl || '');
+        if (vid) return vid;
+        const img = document.getElementById('cover');
+        if (img && img.dataset.vmVid) return img.dataset.vmVid;
+        return null;
+      }
+
       function youtubeTimeUrl(videoUrl, seconds) {
-        const vid = extractYouTubeId(videoUrl || '');
+        const vid = resolveYoutubeId(videoUrl);
         if (!vid || seconds == null || seconds < 0) return videoUrl || '#';
-        return 'https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '&t=' + Math.floor(seconds) + 's';
+        // t= 用纯秒数，兼容性更好
+        return 'https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '&t=' + Math.floor(seconds);
       }
 
       function escapeHtml(s) {
@@ -440,27 +453,44 @@
           .replace(/"/g, '&quot;');
       }
 
+      function makeTsAnchor(tsLabel, seconds, videoUrl) {
+        const href = escapeHtml(youtubeTimeUrl(videoUrl, seconds));
+        return (
+          '<a class="ts-link" href="' +
+          href +
+          '" target="_blank" rel="noopener noreferrer">[' +
+          escapeHtml(tsLabel) +
+          ']</a>'
+        );
+      }
+
       /** 将助手回复中的时间戳转为可点击 YouTube 跳转链接 */
       function linkifyTimestamps(text, videoUrl) {
         const esc = escapeHtml(text || '');
-        // 兼容 [mm:ss] / ［mm:ss］ / 【mm:ss】 / (mm:ss) / （mm:ss），以及全角冒号
-        return esc.replace(
-          /[\[［【(（]\s*(\d{1,2})\s*[:：]\s*(\d{2})(?:\s*[:：]\s*(\d{2}))?\s*[\]］】)）]/g,
-          function (_m, a, b, c) {
-            const parts = c != null ? [a, b, c] : [a, b];
-            const ts = parts.join(':');
-            const sec = mmssToSeconds(ts);
-            if (sec == null) return _m;
-            const href = escapeHtml(youtubeTimeUrl(videoUrl, sec));
-            return (
-              '<a class="ts-link" href="' +
-              href +
-              '" target="_blank" rel="noopener noreferrer">[' +
-              ts +
-              ']</a>'
-            );
-          }
-        );
+        // 分钟允许 1–4 位（字幕对长视频会写成 [105:23]）
+        const wrapped =
+          /[\[［【(（]\s*(\d{1,4})\s*[:：]\s*(\d{2})(?:\s*[:：]\s*(\d{2}))?\s*[\]］】)）]/g;
+        let html = esc.replace(wrapped, function (_m, a, b, c) {
+          const parts = c != null && c !== '' ? [a, b, c] : [a, b];
+          const ts = parts.join(':');
+          const sec = mmssToSeconds(ts);
+          if (sec == null) return _m;
+          return makeTsAnchor(ts, sec, videoUrl);
+        });
+        // 再处理裸时间戳：01:23 / 1:05:30（避开已生成的 <a> 标签内容）
+        html = html.replace(/(^|>)([^<]+)/g, function (_m, prefix, chunk) {
+          const linked = chunk.replace(
+            /(^|[^\d])(\d{1,4}[:：]\d{2}(?:[:：]\d{2})?)(?!\d)/g,
+            function (_m2, lead, raw) {
+              const ts = String(raw).replace(/：/g, ':');
+              const sec = mmssToSeconds(ts);
+              if (sec == null) return _m2;
+              return lead + makeTsAnchor(ts, sec, videoUrl);
+            }
+          );
+          return prefix + linked;
+        });
+        return html;
       }
 
       function showChatLoading() {
@@ -714,6 +744,17 @@
         document.getElementById('chatClose').onclick = () => closeChat();
         chatOverlay.addEventListener('click', (e) => {
           if (e.target === chatOverlay) closeChat();
+        });
+        // 强制打开时间戳链接（部分 WebView / PWA 对 <a target=_blank> 不灵敏）
+        chatMessages.addEventListener('click', (e) => {
+          const a = e.target && e.target.closest ? e.target.closest('a.ts-link') : null;
+          if (!a) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const href = a.getAttribute('href');
+          if (!href || href === '#') return;
+          const win = window.open(href, '_blank', 'noopener,noreferrer');
+          if (!win) window.location.href = href;
         });
         chatSend.onclick = () => sendChat();
         chatInput.addEventListener('keydown', (e) => {
