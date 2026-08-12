@@ -441,8 +441,8 @@
       function youtubeTimeUrl(videoUrl, seconds) {
         const vid = resolveYoutubeId(videoUrl);
         if (!vid || seconds == null || seconds < 0) return videoUrl || '#';
-        // t= 用纯秒数，兼容性更好
-        return 'https://www.youtube.com/watch?v=' + encodeURIComponent(vid) + '&t=' + Math.floor(seconds);
+        // youtu.be + t=秒 在手机上更易唤起 YouTube
+        return 'https://youtu.be/' + encodeURIComponent(vid) + '?t=' + Math.floor(seconds);
       }
 
       function escapeHtml(s) {
@@ -455,10 +455,15 @@
 
       function makeTsAnchor(tsLabel, seconds, videoUrl) {
         const href = escapeHtml(youtubeTimeUrl(videoUrl, seconds));
+        if (!href || href === '#') {
+          return '[' + escapeHtml(tsLabel) + ']';
+        }
         return (
           '<a class="ts-link" href="' +
           href +
-          '" target="_blank" rel="noopener noreferrer">[' +
+          '" target="_blank" rel="noopener noreferrer" data-t="' +
+          Math.floor(seconds) +
+          '">[' +
           escapeHtml(tsLabel) +
           ']</a>'
         );
@@ -466,21 +471,40 @@
 
       /** 将助手回复中的时间戳转为可点击 YouTube 跳转链接 */
       function linkifyTimestamps(text, videoUrl) {
-        const esc = escapeHtml(text || '');
-        // 分钟允许 1–4 位（字幕对长视频会写成 [105:23]）
-        const wrapped =
-          /[\[［【(（]\s*(\d{1,4})\s*[:：]\s*(\d{2})(?:\s*[:：]\s*(\d{2}))?\s*[\]］】)）]/g;
-        let html = esc.replace(wrapped, function (_m, a, b, c) {
-          const parts = c != null && c !== '' ? [a, b, c] : [a, b];
-          const ts = parts.join(':');
-          const sec = mmssToSeconds(ts);
-          if (sec == null) return _m;
-          return makeTsAnchor(ts, sec, videoUrl);
-        });
-        // 再处理裸时间戳：01:23 / 1:05:30（避开已生成的 <a> 标签内容）
+        let html = escapeHtml(text || '');
+        // 轻度渲染加粗，避免 **文字** 干扰阅读
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+        const TS = '\\d{1,4}[:：]\\d{2}(?:[:：]\\d{2})?';
+        const SEP = '[-–—~～至到]';
+
+        // 1) 区间：[04:54-04:58] / 【04:54至04:58】→ 跳到起点
+        html = html.replace(
+          new RegExp('[\\[［【]\\s*(' + TS + ')\\s*' + SEP + '\\s*(' + TS + ')\\s*[\\]］】]', 'g'),
+          function (_m, a, _b) {
+            const start = String(a).replace(/：/g, ':');
+            const end = String(_b).replace(/：/g, ':');
+            const sec = mmssToSeconds(start);
+            if (sec == null) return _m;
+            return makeTsAnchor(start + '-' + end, sec, videoUrl);
+          }
+        );
+
+        // 2) 单点：[04:54] / （04:54）
+        html = html.replace(
+          new RegExp('[\\[［【(（]\\s*(' + TS + ')\\s*[\\]］】)）]', 'g'),
+          function (_m, a) {
+            const ts = String(a).replace(/：/g, ':');
+            const sec = mmssToSeconds(ts);
+            if (sec == null) return _m;
+            return makeTsAnchor(ts, sec, videoUrl);
+          }
+        );
+
+        // 3) 裸时间：01:23（避开已生成的标签）
         html = html.replace(/(^|>)([^<]+)/g, function (_m, prefix, chunk) {
           const linked = chunk.replace(
-            /(^|[^\d])(\d{1,4}[:：]\d{2}(?:[:：]\d{2})?)(?!\d)/g,
+            new RegExp('(^|[^\\d])(' + TS + ')(?!\\d)', 'g'),
             function (_m2, lead, raw) {
               const ts = String(raw).replace(/：/g, ':');
               const sec = mmssToSeconds(ts);
