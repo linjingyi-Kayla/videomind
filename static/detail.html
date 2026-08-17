@@ -374,7 +374,7 @@
           <h2 id="chatTitle">问视频</h2>
           <button type="button" class="chat-close" id="chatClose" aria-label="关闭">×</button>
         </div>
-        <p class="chat-hint" id="chatHint">基于本视频字幕与总结回答；回答中的 [mm:ss] 可点击跳转。</p>
+        <p class="chat-hint" id="chatHint">可问本视频内容、核对公开信息、让我记笔记或设提醒；时间戳可点击跳转。</p>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-compose">
           <input id="chatInput" type="text" placeholder="问一句关于这个视频的问题…" autocomplete="off" />
@@ -644,7 +644,7 @@
           return;
         }
         if (hasSubtitles) {
-          chatHint.textContent = '基于本视频字幕与总结回答；回答中的 [mm:ss] 可点击跳转 YouTube。';
+          chatHint.textContent = '可问本视频内容、核对公开信息、让我记笔记或设提醒；回答中的时间戳可点开 YouTube。';
         } else {
           chatHint.textContent =
             '该视频暂无字幕缓存（旧任务可重新导入）。仍可依据标题/总结提问，但通常无法给出精确时间戳。';
@@ -701,7 +701,10 @@
           const r = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text }),
+            body: JSON.stringify({
+              message: text,
+              tz_offset_minutes: new Date().getTimezoneOffset(),
+            }),
             cache: 'no-store',
           });
           const data = await r.json().catch(() => ({}));

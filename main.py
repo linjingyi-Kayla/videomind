@@ -8,7 +8,7 @@ import os
 import secrets
 import uuid
 import re
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote, urlencode
@@ -24,11 +24,13 @@ from pydantic import BaseModel, EmailStr, Field, HttpUrl
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from videomind.ai_service import analyze_video, chat_about_video
+from videomind.agent.agent import run_agent
+from videomind.ai_service import analyze_video
 from videomind.auth import create_access_token, get_user_by_token, hash_password, verify_password
 from videomind.db import init_db, new_session
 from videomind.db_models import ChatMessage, Subscription, Task, User
 from videomind.extractor import _extract_youtube_video_id, extract_video_text
+from videomind.remind import calc_next_remind_datetime as _calc_next_remind_datetime
 from videomind.webpush import send_web_push
 
 load_dotenv(override=False)
@@ -295,38 +297,6 @@ def _history_item_from_task(t: Task) -> HistoryItem:
         status=t.status,
         created_at=t.created_at,
     )
-
-
-def _parse_time_hhmm(hhmm: str) -> time:
-    hh, mm = hhmm.split(":")
-    return time(hour=int(hh), minute=int(mm))
-
-
-def _calc_next_remind_datetime(hhmm: str, tz_offset_minutes: Optional[int] = None) -> datetime:
-    """
-    将 `HH:MM` 计算为“下一次提醒时间”的 UTC 存库值（naive UTC）。
-
-    - tz_offset_minutes：与浏览器 `Date.getTimezoneOffset()` 一致（东八区通常为 -480）。
-      传入时按用户本地墙钟解释 HH:MM。
-    - 为 None 时按 UTC 墙钟解释（兼容旧行为 / 服务端无用户时区时）。
-    """
-    t = _parse_time_hhmm(hhmm)
-    now = _now_utc()
-    now_naive = now.replace(tzinfo=None)
-
-    if tz_offset_minutes is None:
-        dt = datetime.combine(now.date(), t)
-        if dt <= now_naive:
-            dt = dt + timedelta(days=1)
-        return dt
-
-    local_wall = now_naive - timedelta(minutes=tz_offset_minutes)
-    local_date = local_wall.date()
-    candidate = datetime.combine(local_date, t)
-    if candidate <= local_wall:
-        candidate = candidate + timedelta(days=1)
-    utc_candidate = candidate + timedelta(minutes=tz_offset_minutes)
-    return utc_candidate
 
 
 def _fallback_title_from_summary(summary: Optional[str]) -> Optional[str]:
@@ -940,6 +910,8 @@ class ChatHistoryResponse(BaseModel):
 
 class ChatPostRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    # 与 Date.getTimezoneOffset() 一致，供 Agent set_reminder 使用；不传则按服务端默认
+    tz_offset_minutes: Optional[int] = None
 
 
 class ChatPostResponse(BaseModel):
@@ -1033,6 +1005,15 @@ def post_task_chat(
         )
         history = [{"role": m.role, "content": m.content} for m in history_rows[-12:]]
 
+        tz_off = body.tz_offset_minutes
+        if tz_off is None:
+            _tz_env = os.getenv("VIDEOMIND_DEFAULT_TZ_OFFSET")
+            if _tz_env is not None and str(_tz_env).strip() != "":
+                try:
+                    tz_off = int(str(_tz_env).strip())
+                except ValueError:
+                    tz_off = None
+
         user_row = ChatMessage(
             task_uuid=task_id,
             user_id=current_user.id,
@@ -1045,14 +1026,16 @@ def post_task_chat(
         session.refresh(user_row)
 
         try:
-            answer = chat_about_video(
-                title=task.title,
-                summary=task.summary,
-                subtitles_text=getattr(task, "subtitles_text", None),
-                video_url=task.video_url,
-                history=history,
+            agent_out = run_agent(
+                user_id=current_user.id,
+                task_id=task_id,
                 user_message=msg,
+                chat_history=history,
+                tz_offset_minutes=tz_off,
             )
+            answer = (agent_out.content or "").strip()
+            if not answer:
+                raise RuntimeError("模型返回为空")
         except Exception as e:
             # 模型失败时保留用户消息，便于重试
             raise HTTPException(status_code=502, detail=f"问答失败：{e}") from e
